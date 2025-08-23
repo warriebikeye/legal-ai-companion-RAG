@@ -9,9 +9,9 @@ export async function getRAGAnswer(query, country = 'nigeria') {
   const cached = await redis.get(cacheKey);
 
   if (cached) {
-    console.log('💡 Served from Redis cache');
-    return JSON.parse(cached);
-  }
+  console.log('💡 Served from Redis cache');
+  return typeof cached === "string" ? JSON.parse(cached) : cached;
+}
 
   // ✅ Gemini-only embedding
   let vector;
@@ -51,7 +51,8 @@ export async function getRAGAnswer(query, country = 'nigeria') {
     const answer = await geminiLLM.getAnswer(query, context, systemPrompt);
 
     const response = { answer, sources };
-    await redis.setEx(cacheKey, CACHE_TTL, JSON.stringify(response));
+    //await redis.setEx(cacheKey, CACHE_TTL, JSON.stringify(response));
+    await redis.set(cacheKey, JSON.stringify(response), { ex: CACHE_TTL });
     return response;
   } catch (err) {
     console.error(`❌ LLM response failed with Gemini: ${err.message}`);
