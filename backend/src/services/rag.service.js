@@ -32,7 +32,15 @@ export async function getRAGAnswer(query, country = 'nigeria') {
   });
 
   const contextChunks = results.map(r => r.payload.text);
-  const sources = [...new Set(results.map(r => r.payload.source).filter(Boolean))];
+
+  // ✅ Sources: just unique document names (no page numbers)
+  const sources = [
+    ...new Set(
+      results
+        .map(r => r.payload.source)
+        .filter(Boolean)
+    ),
+  ];
 
   const context = contextChunks.join('\n\n');
   const systemPrompt = `You are a legal assistant. Use only ${country.toUpperCase()}'s laws to

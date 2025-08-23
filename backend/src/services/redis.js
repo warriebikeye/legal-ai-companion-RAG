@@ -1,7 +1,8 @@
 import { createClient } from 'redis';
 
 const redisClient = createClient({
-  url: 'redis://localhost:6379' // or your cloud Redis endpoint
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
 redisClient.on('error', err => console.error('❌ Redis Error:', err));
