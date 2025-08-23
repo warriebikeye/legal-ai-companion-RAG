@@ -11,8 +11,12 @@ const options = {
     },
     servers: [
       {
-        url: 'http://localhost:5000', // Replace with deployed URL when ready
-        description: 'Local server',
+        url: 'http://localhost:5000',
+        description: 'Local development server',
+      },
+      {
+        url: 'https://legal-ai-companion-rag.onrender.com',
+        description: 'Production server',
       },
     ],
   },
