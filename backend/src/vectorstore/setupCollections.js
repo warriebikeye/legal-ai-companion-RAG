@@ -11,14 +11,14 @@ const qdrant = new QdrantClient({
 const countries = ['nigeria', 'kenya', 'ghana'];
 
 for (const country of countries) {
-  const collectionName = `legal_chunks_${country}`;
+  const collectionName = `legal_chunks_${country}-gm`;
   const exists = await qdrant.getCollections()
     .then(res => res.collections.some(c => c.name === collectionName));
 
   if (!exists) {
     await qdrant.createCollection(collectionName, {
       vectors: {
-        size: 1536,     // required by OpenAI/Gemini embeddings
+        size:3072,     // required by Gemini embeddings
         distance: 'Cosine',
       },
     });

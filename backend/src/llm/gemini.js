@@ -2,7 +2,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const chatModel = genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
-const embedModel = genAI.getGenerativeModel({ model: 'embedding-001' });
+//const embedModel = genAI.getGenerativeModel({ model: 'embedding-001' });
+const embedModel = genAI.getGenerativeModel({ model: 'gemini-embedding-001' });
 
 export async function getEmbedding(text) {
   const result = await embedModel.embedContent(text);

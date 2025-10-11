@@ -10,7 +10,7 @@ dotenv.config();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // ✅ Gemini embedding size
-const GEMINI_EMBED_DIM = 768;
+const GEMINI_EMBED_DIM = 3072;
 
 function cleanText(text) {
   return text
@@ -21,24 +21,29 @@ function cleanText(text) {
 
 async function ensureCollection(collectionName) {
   try {
-    const collections = await qdrant.getCollections();
-    if (!collections.collections.find(c => c.name === collectionName)) {
-      console.log(`🆕 Creating Qdrant collection: ${collectionName}`);
-      await qdrant.createCollection(collectionName, {
-        vectors: {
-          size: GEMINI_EMBED_DIM, // ✅ always 768 for Gemini
-          distance: 'Cosine',
-        },
-      });
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
+    // Delete existing collection first
+    console.log(`🗑️ Deleting existing collection (if any): ${collectionName}`);
+    await qdrant.deleteCollection(collectionName).catch(() =>
+      console.log(`ℹ️ No existing collection found for ${collectionName}`)
+    );
+
+    // Wait a bit before recreating
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    console.log(`🆕 Creating fresh Qdrant collection: ${collectionName}`);
+    await qdrant.createCollection(collectionName, {
+      vectors: {
+        size: GEMINI_EMBED_DIM,
+        distance: 'Cosine',
+      },
+    });
+
+    // small delay to ensure Qdrant finishes creating it
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    console.log(`✅ Collection ${collectionName} is ready`);
   } catch (err) {
-    if (err.statusCode === 409) {
-      console.log(`⚠️ Collection ${collectionName} already exists`);
-    } else {
-      console.error('❌ Failed to check/create collection:', err);
-      throw err;
-    }
+    console.error('❌ Failed to recreate collection:', err);
+    throw err;
   }
 }
 
@@ -71,39 +76,60 @@ export async function ingestFile(file, country) {
 
   console.log(`🔄 Preparing to upload ${paragraphs.length} chunks to collection: ${collection}`);
 
-  const embeddingModel = genAI.getGenerativeModel({ model: 'embedding-001' });
+  const embeddingModel = genAI.getGenerativeModel({ model: 'gemini-embedding-001' });
   const points = [];
 
+  // ✅ Embedding loop with retry + exponential backoff
   for (let i = 0; i < paragraphs.length; i++) {
-  let { text: chunk, page } = paragraphs[i];
+    let { text: chunk, page } = paragraphs[i];
 
-  if (chunk.length > 3000) {
-    console.warn(`⚠️ Chunk ${i} too long (${chunk.length} chars). Truncating.`);
-    chunk = chunk.slice(0, 3000);
+    if (chunk.length > 3000) {
+      console.warn(`⚠️ Chunk ${i} too long (${chunk.length} chars). Truncating.`);
+      chunk = chunk.slice(0, 3000);
+    }
+
+    let success = false;
+    let retries = 0;
+    const maxRetries = 5;
+
+    while (!success && retries < maxRetries) {
+      try {
+        const result = await embeddingModel.embedContent({
+          content: { parts: [{ text: chunk }] },
+        });
+
+        const vector = result.embedding.values;
+
+        points.push({
+          id: uuidv4(),
+          vector,
+          payload: {
+            text: chunk,
+            country,
+            source: file.originalname,
+            page,
+          },
+        });
+
+        success = true; // ✅ success — stop retrying
+
+        // Add a delay to avoid hitting rate limits again
+        await new Promise(resolve => setTimeout(resolve, 300));
+      } catch (err) {
+        if (err.message.includes('429')) {
+          retries++;
+          const backoff = 1000 * retries ** 2; // exponential backoff
+          console.warn(
+            `⏳ 429 rate limit hit. Retrying chunk ${i} in ${backoff} ms (attempt ${retries})`
+          );
+          await new Promise(resolve => setTimeout(resolve, backoff));
+        } else {
+          console.error(`⚠️ Embedding failed for chunk ${i}: ${err.message}`);
+          break; // skip on other errors
+        }
+      }
+    }
   }
-
-  try {
-    const result = await embeddingModel.embedContent({
-      content: { parts: [{ text: chunk }] },
-    });
-
-    const vector = result.embedding.values;
-
-    points.push({
-      id: uuidv4(),
-      vector,
-      payload: {
-        text: chunk,
-        country,
-        source: path.basename(file.path), // ✅ fixed
-        page,                             // ✅ fixed
-      },
-    });
-  } catch (err) {
-    console.error(`⚠️ Embedding failed for chunk ${i}: ${err.message}`);
-  }
-}
-
 
   if (points.length) {
     await uploadInBatches(collection, points);

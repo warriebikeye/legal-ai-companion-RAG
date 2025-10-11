@@ -16,7 +16,7 @@ export async function getRAGAnswer(query, country = 'nigeria') {
   // ✅ Gemini-only embedding
   let vector;
   const collection = `legal_chunks_${country.toLowerCase()}-gm`;
-
+  console.log('💡getting vector');
   try {
     vector = await geminiLLM.getEmbedding(query);
   } catch (err) {
@@ -25,6 +25,7 @@ export async function getRAGAnswer(query, country = 'nigeria') {
   }
 
   // ✅ Search Qdrant with Gemini vectors
+  console.log('💡 searching qdrant');
   const results = await qdrant.search(collection, {
     vector,
     top: 5,
@@ -43,11 +44,20 @@ export async function getRAGAnswer(query, country = 'nigeria') {
   ];
 
   const context = contextChunks.join('\n\n');
-  const systemPrompt = `You are a legal assistant. Use only ${country.toUpperCase()}'s laws to
-   answer the user. Be clear, accurate, and helpful.`;
+  const systemPrompt = `You are a legal assistant providing information based on ${country.toUpperCase()}'s laws.
+
+Use the provided context to answer the user's question clearly and accurately.
+
+IMPORTANT RULES:
+- Do NOT include any file names, document IDs, or source codes in your answer.
+- Only include citations or references if they are legal sections (e.g., "Section 35 of the Constitution").
+- The assistant response must be a clean explanation or legal guidance only.
+- The list of source document IDs will be handled separately by the system. Do not mention or reference them inside the main answer.`;
+
 
   try {
     // ✅ Generate answer with Gemini
+    console.log('💡 Generating response');
     const answer = await geminiLLM.getAnswer(query, context, systemPrompt);
 
     const response = { answer, sources };
