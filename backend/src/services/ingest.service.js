@@ -5,6 +5,7 @@ import { qdrant } from '../vectorstore/qdrant.js';
 import { extractText } from '../utils/extractText.js';
 import dotenv from 'dotenv';
 import path from 'path';
+
 dotenv.config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -21,31 +22,34 @@ function cleanText(text) {
 
 async function ensureCollection(collectionName) {
   try {
-    // Delete existing collection first
-    console.log(`🗑️ Deleting existing collection (if any): ${collectionName}`);
-    await qdrant.deleteCollection(collectionName).catch(() =>
-      console.log(`ℹ️ No existing collection found for ${collectionName}`)
+    console.log(`🔍 Checking if collection exists: ${collectionName}`);
+    const collections = await qdrant.getCollections();
+
+    const exists = collections.collections.some(
+      (col) => col.name === collectionName
     );
 
-    // Wait a bit before recreating
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    if (!exists) {
+      console.log(`🆕 Creating new Qdrant collection: ${collectionName}`);
+      await qdrant.createCollection(collectionName, {
+        vectors: {
+          size: GEMINI_EMBED_DIM,
+          distance: 'Cosine',
+        },
+      });
 
-    console.log(`🆕 Creating fresh Qdrant collection: ${collectionName}`);
-    await qdrant.createCollection(collectionName, {
-      vectors: {
-        size: GEMINI_EMBED_DIM,
-        distance: 'Cosine',
-      },
-    });
-
-    // small delay to ensure Qdrant finishes creating it
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    console.log(`✅ Collection ${collectionName} is ready`);
+      // small delay to ensure Qdrant finishes creating it
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      console.log(`✅ Collection ${collectionName} created and ready`);
+    } else {
+      console.log(`✅ Collection ${collectionName} already exists — continuing ingestion`);
+    }
   } catch (err) {
-    console.error('❌ Failed to recreate collection:', err);
+    console.error('❌ Failed to ensure collection:', err);
     throw err;
   }
 }
+
 
 async function uploadInBatches(collectionName, points, batchSize = 100) {
   for (let i = 0; i < points.length; i += batchSize) {
