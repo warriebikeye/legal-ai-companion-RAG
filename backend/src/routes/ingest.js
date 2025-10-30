@@ -107,7 +107,7 @@ router.post('/train', upload.single('file'), async (req, res) => {
  *       500:
  *         description: Bulk upload failed
  */
-router.post('/train/multiple', upload.array('files', 10), async (req, res) => {
+router.post('/train/multiple', upload.array('files', 20), async (req, res) => {
   try {
     const results = [];
 
@@ -126,5 +126,6 @@ router.post('/train/multiple', upload.array('files', 10), async (req, res) => {
     res.status(500).json({ error: 'Bulk upload failed' });
   }
 });
+
 
 export default router;
