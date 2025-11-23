@@ -4,8 +4,8 @@ import * as geminiLLM from '../llm/gemini.js';
 
 const CACHE_TTL = 60 * 60; // 1 hour
 
-export async function getRAGAnswer(query, country = 'nigeria') {
-  const cacheKey = `answer::${country.toLowerCase()}::${query.trim()}`;
+export async function getRAGAnswer(query, country = 'nigeria',extraContext = "") {
+  const cacheKey = `answer::${country}::${query}::${extraContext.slice(0,200)}`;
   const cached = await redis.get(cacheKey);
 
   if (cached) {
@@ -33,7 +33,7 @@ export async function getRAGAnswer(query, country = 'nigeria') {
   });
 
   const contextChunks = results.map(r => r.payload.text);
-
+  const fullContext = (extraContext ? (extraContext + "\n\n") : "") + contextChunks.join("\n\n");
   // ✅ Sources: just unique document names (no page numbers)
   const sources = [
     ...new Set(
@@ -43,7 +43,6 @@ export async function getRAGAnswer(query, country = 'nigeria') {
     ),
   ];
 
-  const context = contextChunks.join('\n\n');
   const systemPrompt = `You are a legal assistant providing information based on ${country.toUpperCase()}'s laws.
 
 Use the provided context to answer the user's question clearly and accurately.
@@ -58,7 +57,7 @@ IMPORTANT RULES:
   try {
     // ✅ Generate answer with Gemini
     console.log('💡 Generating response');
-    const answer = await geminiLLM.getAnswer(query, context, systemPrompt);
+    const answer = await geminiLLM.getAnswer(query, fullContext, systemPrompt);
 
     const response = { answer, sources };
     //await redis.setEx(cacheKey, CACHE_TTL, JSON.stringify(response));
