@@ -1,10 +1,10 @@
-import pdf from "pdf-parse";
+import * as pdf from "pdf-parse";   // ✅ FIXED
 import Tesseract from "tesseract.js";
 import fs from "fs/promises";
 
 export class ExtractionService {
   async extractFromPDF(buffer) {
-    const data = await pdf(buffer);
+    const data = await pdf.default(buffer) || await pdf(buffer); 
     return data.text || "";
   }
 
@@ -44,3 +44,4 @@ export class ExtractionService {
     return finalText.trim();
   }
 }
+
