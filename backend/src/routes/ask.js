@@ -1,6 +1,8 @@
 import express from 'express';
+import multer from 'multer';
 import { handleTextQuery } from '../controllers/ask.controller.js';
 
+const upload = multer();
 const router = express.Router();
 
 /**
@@ -52,6 +54,7 @@ const router = express.Router();
  *       500:
  *         description: Server error
  */
-router.post('/text', handleTextQuery);
+//router.post('/text', handleTextQuery);
+router.post('/text', upload.array('files'), handleTextQuery);
 
 export default router;

@@ -5,40 +5,66 @@ import { getRAGAnswer } from "../services/rag.service.js";
 const extractor = new ExtractionService();
 const clauseChecker = new ClauseCheckerService();
 
+/**
+ * Handles legal text queries with optional file uploads.
+ * Accepts multipart/form-data:
+ *   - query (string)
+ *   - country (string)
+ *   - files[] (pdf/images/etc.)
+ */
 export async function handleTextQuery(req, res) {
   try {
-    const { query, country = "nigeria" } = req.body;
+    // Because of multer, req.body contains the fields
+    const query = req.body.query;
+    const country = (req.body.country || "nigeria").toLowerCase();
 
-    // Query is required, but files are optional
-    if (!query) {
+    if (!query || query.trim().length === 0) {
       return res.status(400).json({ error: "Query is required" });
     }
 
     let extractedText = "";
     let clauseAnalysis = null;
 
-    // Extract only if files exist
+    // Handle uploaded files (if any)
     if (req.files && req.files.length > 0) {
-      extractedText = await extractor.extract(req.files);
+      try {
+        extractedText = await extractor.extract(req.files);
 
-      if (extractedText.trim().length > 0) {
-        clauseAnalysis = await clauseChecker.checkIllegalClauses(extractedText, country);
+        if (extractedText && extractedText.trim().length > 0) {
+          clauseAnalysis = await clauseChecker.checkIllegalClauses(
+            extractedText,
+            country
+          );
+        }
+      } catch (fileErr) {
+        console.error("❌ File extraction error:", fileErr);
+        return res.status(500).json({
+          error: "Failed to extract text from uploaded files",
+          details: fileErr.message,
+        });
       }
     }
 
-    // RAG Answer (merge query + optional file context)
-    const { answer, sources } =
-      await getRAGAnswer(query, country.toLowerCase(), extractedText);
+    // Get the RAG-generated answer
+    const ragResponse = await getRAGAnswer(query, country, extractedText);
+
+    // Ensure RAG returns structured output
+    const answer = ragResponse?.answer || "No answer generated.";
+    const sources = ragResponse?.sources || [];
 
     return res.json({
+      success: true,
       answer,
       sources,
       documentText: extractedText || null,
-      clauseAnalysis: clauseAnalysis || null
+      clauseAnalysis: clauseAnalysis || null,
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Something went wrong" });
+    console.error("❌ Controller Error:", err);
+    return res.status(500).json({
+      error: "Internal server error",
+      details: err.message,
+    });
   }
 }
