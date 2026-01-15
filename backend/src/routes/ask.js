@@ -1,5 +1,6 @@
 import express from 'express';
 import multer from 'multer';
+import { requireAuth } from "../middleware/requireAuth.js";
 import { handleTextQuery } from '../controllers/ask.controller.js';
 
 const upload = multer();

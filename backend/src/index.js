@@ -1,16 +1,30 @@
 import express from 'express';
 import { swaggerUi, specs } from './docs/swagger.js';
 import dotenv from 'dotenv';
+import passport from "passport";
+import session from "express-session";
 import cors from 'cors'; 
 import askRoutes from './routes/ask.js';
 import voiceRoutes from './routes/voice.js';
 import ingestRoutes from './routes/ingest.js';
 import violationRoutes from './routes/violation.route.js';
+import authRoutes from "./routes/auth.routes.js";
+import './config/passport.js'
 
 dotenv.config();
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'secret',  // Use a secret for session encryption
+  resave: false,
+  saveUninitialized: true,
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+app.use("/auth", authRoutes);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 app.use('/ask', askRoutes);
 app.use('/ask', voiceRoutes);
