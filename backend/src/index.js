@@ -13,7 +13,13 @@ import './config/passport.js'
 
 dotenv.config();
 const app = express();
-app.use(cors());
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production' ? process.env.CLIENT_URL_PROD : process.env.CLIENT_URL_TEST,  // Choose the URL based on the environment
+  methods: "GET,POST",
+  credentials: true,  // Allow cookies to be sent with requests
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(session({
   secret: process.env.SESSION_SECRET || 'secret',  // Use a secret for session encryption
