@@ -16,9 +16,9 @@ export const googleCallback = (req, res, next) => {
 
       // Redirect based on NODE_ENV
       const redirectUrl =
-        process.env.NODE_ENV === 'development'
-          ? process.env.CLIENT_URL_TEST || 'http://localhost:3000' // Fallback to local URL if the environment variable is missing
-          : process.env.CLIENT_URL_PROD || 'https://legal-ai-companion-rag-fr.onrender.com'; // Fallback to production URL if the environment variable is missing
+        process.env.NODE_ENV === 'production'
+          ? process.env.CLIENT_URL_PROD || 'https://legal-ai-companion-rag-fr.onrender.com' // Fallback to local URL if the environment variable is missing
+          : process.env.CLIENT_URL_TEST  || 'http://localhost:3000'; // Fallback to production URL if the environment variable is missing
 
       return res.redirect(`${redirectUrl}`);
     });
