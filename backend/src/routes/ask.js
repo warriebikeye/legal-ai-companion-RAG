@@ -56,6 +56,6 @@ const router = express.Router();
  *         description: Server error
  */
 //router.post('/text', handleTextQuery);
-router.post('/text', upload.array('files'), handleTextQuery);
+router.post('/text',requireAuth, upload.array('files'), handleTextQuery);
 
 export default router;
