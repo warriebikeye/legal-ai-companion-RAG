@@ -20,7 +20,7 @@ export const googleCallback = (req, res, next) => {
           ? process.env.CLIENT_URL_TEST || 'http://localhost:3000' // Fallback to local URL if the environment variable is missing
           : process.env.CLIENT_URL_PROD || 'https://legal-ai-companion-rag-fr.onrender.com'; // Fallback to production URL if the environment variable is missing
 
-      return res.redirect(`${redirectUrl}/dashboard`);
+      return res.redirect(`${redirectUrl}`);
     });
   })(req, res, next);
 };
