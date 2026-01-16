@@ -16,7 +16,8 @@ export const googleCallback = (req, res, next) => {
 
       // If you have a frontend, redirect there
       // Example: res.redirect(`${process.env.CLIENT_URL}/dashboard`);
-      return res.redirect("/dashboard");
+      //return res.redirect("/dashboard");
+      return res.redirect(`${process.env.CLIENT_URL}/dashboard`);
     });
   })(req, res, next);
 };
