@@ -14,7 +14,7 @@ export const googleCallback = (req, res, next) => {
       if (loginErr) return next(loginErr);
 
       const redirectUrl =
-        process.env.NODE_ENV === "production"
+        process.env.NODE_ENV === 'production'
           ? process.env.CLIENT_URL_PROD
           : process.env.CLIENT_URL_TEST;
 
