@@ -7,6 +7,7 @@ export const googleAuth = passport.authenticate("google", {
 
 export const googleCallback = (req, res, next) => {
   passport.authenticate("google", { failureRedirect: "/" }, (err, user) => {
+     console.log("OAuth callback hit", { err, user });
     if (err) return next(err);
     if (!user) return res.redirect("/");
 
