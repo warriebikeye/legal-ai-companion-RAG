@@ -10,26 +10,26 @@ export const googleCallback = (req, res, next) => {
     if (err) return next(err);
     if (!user) return res.redirect("/");
 
-    // creates req.user + session
     req.logIn(user, (loginErr) => {
       if (loginErr) return next(loginErr);
 
-      // Redirect based on NODE_ENV
       const redirectUrl =
-        process.env.NODE_ENV === 'production'
-          ? process.env.CLIENT_URL_PROD || 'https://legal-ai-companion-rag-fr.onrender.com' // Fallback to local URL if the environment variable is missing
-          : process.env.CLIENT_URL_TEST  || 'http://localhost:3000'; // Fallback to production URL if the environment variable is missing
+        process.env.NODE_ENV === "production"
+          ? process.env.CLIENT_URL_PROD
+          : process.env.CLIENT_URL_TEST;
 
-      return res.redirect(`${redirectUrl}`);
+      return res.redirect(redirectUrl);
     });
   })(req, res, next);
 };
 
+
 export const me = (req, res) => {
   return res.json({
-    authenticated: req.isAuthenticated?.() === true,
-    user: req.user || null,
-  });
+  isAuthenticated: req.isAuthenticated?.() === true,
+  userEmail: req.user?.email,
+  userImage: req.user?.photo,
+});
 };
 
 export const logout = (req, res, next) => {

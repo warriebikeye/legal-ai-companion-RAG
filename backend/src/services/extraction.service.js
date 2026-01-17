@@ -1,11 +1,11 @@
-import * as pdf from "pdf-parse";   // ✅ FIXED
+import pdf from "pdf-parse/lib/pdf-parse.js"; // ✅ NODE-SAFE IMPORT
 import Tesseract from "tesseract.js";
 import fs from "fs/promises";
 
 export class ExtractionService {
   async extractFromPDF(buffer) {
-    const data = await pdf.default(buffer) || await pdf(buffer); 
-    return data.text || "";
+    const data = await pdf(buffer);
+    return data?.text || "";
   }
 
   async extractFromTXT(buffer) {
@@ -14,7 +14,7 @@ export class ExtractionService {
 
   async extractFromImage(buffer) {
     const result = await Tesseract.recognize(buffer, "eng");
-    return result.data.text || "";
+    return result?.data?.text || "";
   }
 
   async extract(files) {
@@ -27,13 +27,13 @@ export class ExtractionService {
 
       if (file.mimetype === "application/pdf") {
         finalText += await this.extractFromPDF(buffer);
-      } 
+      }
       else if (file.mimetype.startsWith("text/")) {
         finalText += await this.extractFromTXT(buffer);
-      } 
+      }
       else if (file.mimetype.startsWith("image/")) {
         finalText += await this.extractFromImage(buffer);
-      } 
+      }
       else {
         console.warn(`Unsupported file: ${file.originalname}`);
       }
@@ -44,4 +44,3 @@ export class ExtractionService {
     return finalText.trim();
   }
 }
-
