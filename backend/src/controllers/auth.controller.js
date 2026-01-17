@@ -13,6 +13,7 @@ export const googleCallback = (req, res, next) => {
 
     req.logIn(user, (loginErr) => {
       if (loginErr) return next(loginErr);
+      console.log("Session after login:", req.session); // <-- should show a session ID
       const redirectUrl =
         process.env.NODE_ENV === "production"
           ? process.env.CLIENT_URL_PROD
