@@ -34,7 +34,7 @@ app.use(cors(corsOptions));
 // JSON parser
 // ----------------------
 app.use(express.json());
-
+app.set('trust proxy', 1);
 // ----------------------
 // Session setup
 // ----------------------
