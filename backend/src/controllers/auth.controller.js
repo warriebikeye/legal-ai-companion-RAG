@@ -7,18 +7,16 @@ export const googleAuth = passport.authenticate("google", {
 
 export const googleCallback = (req, res, next) => {
   passport.authenticate("google", { failureRedirect: "/" }, (err, user) => {
-     console.log("OAuth callback hit", { err, user });
+    console.log("OAuth callback hit", { err, user });
     if (err) return next(err);
     if (!user) return res.redirect("/");
 
     req.logIn(user, (loginErr) => {
       if (loginErr) return next(loginErr);
-
       const redirectUrl =
-        process.env.NODE_ENV === 'production'
+        process.env.NODE_ENV === "production"
           ? process.env.CLIENT_URL_PROD
           : process.env.CLIENT_URL_TEST;
-
       return res.redirect(redirectUrl);
     });
   })(req, res, next);
