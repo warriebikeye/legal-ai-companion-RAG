@@ -23,14 +23,14 @@ export const googleCallback = (req, res, next) => {
   })(req, res, next);
 };
 
-
 export const me = (req, res) => {
   return res.json({
-  isAuthenticated: req.isAuthenticated?.() === true,
-  userEmail: req.user?.email,
-  userImage: req.user?.photo,
-});
+    isAuthenticated: req.isAuthenticated?.() === true,
+    userEmail: req.user?.emails?.[0]?.value || null,
+    userImage: req.user?.photos?.[0]?.value || null,
+  });
 };
+
 
 export const logout = (req, res, next) => {
   // Passport requires a callback for logout in newer versions :contentReference[oaicite:1]{index=1}
