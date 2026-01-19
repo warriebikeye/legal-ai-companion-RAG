@@ -15,9 +15,9 @@ const GEMINI_EMBED_DIM = 3072;
 
 function cleanText(text) {
   return text
-    .replace(/[\x00-\x1F\x7F]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/[\x00-\x1F\x7F]/g, '')  // Remove non-printable characters
+    .replace(/\s+/g, ' ')            // Collapse multiple spaces into one
+    .trim();                         // Trim leading and trailing spaces
 }
 
 async function ensureCollection(collectionName) {
@@ -49,7 +49,6 @@ async function ensureCollection(collectionName) {
     throw err;
   }
 }
-
 
 async function uploadInBatches(collectionName, points, batchSize = 100) {
   for (let i = 0; i < points.length; i += batchSize) {
@@ -89,7 +88,7 @@ export async function ingestFile(file, country) {
 
     if (chunk.length > 3000) {
       console.warn(`⚠️ Chunk ${i} too long (${chunk.length} chars). Truncating.`);
-      chunk = chunk.slice(0, 3000);
+      chunk = chunk.slice(0, 3000);  // Truncate long chunks
     }
 
     let success = false;
@@ -143,5 +142,5 @@ export async function ingestFile(file, country) {
   }
 
   console.log(`🗑️ Cleaning up temporary file: ${file.path}`);
-  await fs.unlink(file.path);
+  await fs.unlink(file.path);  // Clean up after processing
 }
