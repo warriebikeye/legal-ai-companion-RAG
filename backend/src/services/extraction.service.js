@@ -1,4 +1,4 @@
-import pdf from "pdf-parse/lib/pdf-parse.js"; // ✅ NODE-SAFE IMPORT
+import * as pdf from 'pdf-parse'; // ✅ NODE-SAFE IMPORT
 import Tesseract from "tesseract.js";
 import fs from "fs/promises";
 
