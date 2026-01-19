@@ -1,23 +1,44 @@
-import * as pdf from 'pdf-parse'; // ✅ NODE-SAFE IMPORT
 import Tesseract from "tesseract.js";
 import fs from "fs/promises";
-import path from 'path';  // Path module to resolve file paths dynamically
+import path from "path";
+
+// ✅ pdfjs-dist works reliably on Render/Node without pdf-parse debug behavior
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+
+/**
+ * Extract per-page text using pdfjs
+ * @param {Uint8Array} data
+ * @returns {Promise<Array<{text: string, page: number}>>}
+ */
+async function extractPdfPages(data) {
+  const loadingTask = getDocument({ data });
+  const pdfDoc = await loadingTask.promise;
+
+  const pages = [];
+  for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+    const page = await pdfDoc.getPage(pageNum);
+    const content = await page.getTextContent();
+
+    // Join extracted text items
+    const text = content.items
+      .map((item) => (typeof item.str === "string" ? item.str : ""))
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    pages.push({ text, page: pageNum });
+  }
+
+  return pages;
+}
 
 export class ExtractionService {
-  // This method now accepts filePath dynamically and checks if the file exists
-  async extractFromPDF(buffer, filePath) {
-    // Resolve path to an absolute path to avoid issues with relative paths in cloud environments
-    const fullPath = path.resolve(filePath);
+  async extractFromPDF(buffer) {
+    const data = new Uint8Array(buffer);
+    const pages = await extractPdfPages(data);
 
-    try {
-      // Check if the file exists at the full path
-      await fs.access(fullPath);  // Ensure the file exists
-      const data = await pdf(buffer);
-      return data?.text || "";
-    } catch (err) {
-      console.error(`File not found at path: ${fullPath}`);
-      return "";  // Return empty if file doesn't exist
-    }
+    // If you want a single combined string:
+    return pages.map((p) => p.text).filter(Boolean).join("\n\n");
   }
 
   async extractFromTXT(buffer) {
@@ -34,26 +55,26 @@ export class ExtractionService {
 
     let finalText = "";
 
-    // Iterate through files and handle extraction based on file type (PDF, text, image)
     for (const file of files) {
-      const buffer = await fs.readFile(file.path);  // Read the file buffer
+      const absPath = path.resolve(file.path);
+      const buffer = await fs.readFile(absPath);
 
       if (file.mimetype === "application/pdf") {
-        finalText += await this.extractFromPDF(buffer, file.path);  // Pass file path dynamically
-      }
-      else if (file.mimetype.startsWith("text/")) {
+        finalText += await this.extractFromPDF(buffer);
+      } else if (file.mimetype.startsWith("text/")) {
         finalText += await this.extractFromTXT(buffer);
-      }
-      else if (file.mimetype.startsWith("image/")) {
+      } else if (file.mimetype.startsWith("image/")) {
         finalText += await this.extractFromImage(buffer);
-      }
-      else {
+      } else {
         console.warn(`Unsupported file: ${file.originalname}`);
       }
 
       finalText += "\n\n";
+
+      // optional: delete temp file here if you want (only if multer stores temp files)
+      // await fs.unlink(absPath);
     }
 
-    return finalText.trim();  // Clean and return the final extracted text
+    return finalText.trim();
   }
 }

@@ -1,59 +1,64 @@
-import fs from 'fs/promises';
-import path from 'path';
-import mammoth from 'mammoth';
-import pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
-import { fileURLToPath } from 'url';
+import fs from "fs/promises";
+import mammoth from "mammoth";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
-// Fix for Node.js: resolve font path properly
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-pdfjsLib.GlobalWorkerOptions.standardFontDataUrl = path.resolve(
-  __dirname,
-  '../node_modules/pdfjs-dist/standard_fonts/'
-);
+function normalize(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
 
-const { getDocument } = pdfjsLib;
-
+/**
+ * Returns: [{ text, page }]
+ */
 export async function extractText(filePath, mimeType) {
-  if (mimeType === 'application/pdf') {
-    const buffer = await fs.readFile(filePath);
-    const pdf = await getDocument({ data: buffer }).promise;
+  // Always resolve path (safer on Render)
+  const absPath = filePath; // filePath from multer is already usable; keep as-is
 
-    let pages = [];
+  if (mimeType === "application/pdf") {
+    const buffer = await fs.readFile(absPath);
+
+    // pdfjs in Node: worker not needed
+    const pdf = await getDocument({ data: new Uint8Array(buffer) }).promise;
+
+    const pages = [];
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      const pageText = content.items.map(item => item.str).join(' ');
 
-      // normalize spaces
-      const cleanText = pageText.replace(/\s+/g, ' ').trim();
+      const pageText = content.items
+        .map((item) => (typeof item.str === "string" ? item.str : ""))
+        .join(" ");
 
       pages.push({
-        pageNumber: i,
-        text: cleanText
+        page: i,
+        text: normalize(pageText),
       });
     }
 
-    return pages; // [{ pageNumber, text }]
+    return pages; // [{ page, text }]
   }
 
-  if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-    const buffer = await fs.readFile(filePath);
+  if (
+    mimeType ===
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ) {
+    const buffer = await fs.readFile(absPath);
     const result = await mammoth.extractRawText({ buffer });
+
     return [
       {
-        pageNumber: 1,
-        text: result.value.replace(/\s+/g, ' ').trim()
-      }
+        page: 1,
+        text: normalize(result.value),
+      },
     ];
   }
 
-  if (mimeType === 'text/plain') {
-    const text = await fs.readFile(filePath, 'utf-8');
+  if (mimeType === "text/plain" || mimeType?.startsWith("text/")) {
+    const text = await fs.readFile(absPath, "utf-8");
     return [
       {
-        pageNumber: 1,
-        text: text.replace(/\s+/g, ' ').trim()
-      }
+        page: 1,
+        text: normalize(text),
+      },
     ];
   }
 
