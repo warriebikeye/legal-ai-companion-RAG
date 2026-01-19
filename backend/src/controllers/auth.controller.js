@@ -23,13 +23,19 @@ export const googleCallback = (req, res, next) => {
   })(req, res, next);
 };
 
-export const me = (req, res) => {
+export function me(req, res) {
+  if (!req.user) {
+    return res.json({ isAuthenticated: false });
+  }
+
   return res.json({
-    isAuthenticated: req.isAuthenticated?.() === true,
-    userEmail: req.user?.emails?.[0]?.value || null,
-    userImage: req.user?.photos?.[0]?.value || null,
+    isAuthenticated: true,
+    userEmail: req.user.email,
+    userImage: req.user.photo,
+    userId: req.user._id,
   });
-};
+}
+
 
 
 export const logout = (req, res, next) => {

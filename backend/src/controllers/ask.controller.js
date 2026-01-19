@@ -1,10 +1,20 @@
 import { ExtractionService } from "../services/extraction.service.js";
 import { ClauseCheckerService } from "../services/clauseChecker.service.js";
 import { getRAGAnswer } from "../services/rag.service.js";
+import {
+  getOrCreateConversation,
+  appendMessage,
+  loadRecentMessages,
+} from "../services/conversation.service.js";
 
 const extractor = new ExtractionService();
 const clauseChecker = new ClauseCheckerService();
 
+function buildHistoryText(messages) {
+  return messages
+    .map(m => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+    .join("\n");
+}
 /**
  * Handles legal text queries with optional file uploads.
  * Accepts multipart/form-data:
@@ -14,57 +24,80 @@ const clauseChecker = new ClauseCheckerService();
  */
 export async function handleTextQuery(req, res) {
   try {
-    // Because of multer, req.body contains the fields
+    const userId = req.user?._id; // ✅ from passport
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
     const query = req.body.query;
     const country = (req.body.country || "nigeria").toLowerCase();
+    const conversationIdFromClient = req.body.conversationId || null;
 
     if (!query || query.trim().length === 0) {
       return res.status(400).json({ error: "Query is required" });
     }
 
+    // ✅ create or load conversation
+    const convo = await getOrCreateConversation({
+      conversationId: conversationIdFromClient,
+      userId,
+      country,
+    });
+
     let extractedText = "";
     let clauseAnalysis = null;
 
-    // Handle uploaded files (if any)
     if (req.files && req.files.length > 0) {
-      try {
-        extractedText = await extractor.extract(req.files);
+      extractedText = await extractor.extract(req.files);
 
-        if (extractedText && extractedText.trim().length > 0) {
-          clauseAnalysis = await clauseChecker.checkIllegalClauses(
-            extractedText,
-            country
-          );
-        }
-      } catch (fileErr) {
-        console.error("❌ File extraction error:", fileErr);
-        return res.status(500).json({
-          error: "Failed to extract text from uploaded files",
-          details: fileErr.message,
-        });
+      if (extractedText.trim()) {
+        clauseAnalysis = await clauseChecker.checkIllegalClauses(extractedText, country);
       }
     }
 
-    // Get the RAG-generated answer
-    const ragResponse = await getRAGAnswer(query, country, extractedText);
+    // ✅ save user message
+    await appendMessage({
+      conversationId: convo._id,
+      userId,
+      role: "user",
+      content: query,
+      documentText: extractedText || "",
+    });
 
-    // Ensure RAG returns structured output
+    // ✅ load last messages for history
+    const recentMsgs = await loadRecentMessages({
+      conversationId: convo._id,
+      userId,
+      limit: 12,
+    });
+
+    const historyText = buildHistoryText(recentMsgs);
+
+    // ✅ ask RAG with history
+    const ragResponse = await getRAGAnswer(query, country, extractedText, historyText);
+
     const answer = ragResponse?.answer || "No answer generated.";
     const sources = ragResponse?.sources || [];
 
+    // ✅ save assistant response
+    await appendMessage({
+      conversationId: convo._id,
+      userId,
+      role: "assistant",
+      content: answer,
+      sources,
+      clauseAnalysis: clauseAnalysis || null,
+      documentText: extractedText || "",
+    });
+
     return res.json({
       success: true,
+      conversationId: String(convo._id),
       answer,
       sources,
       documentText: extractedText || null,
       clauseAnalysis: clauseAnalysis || null,
     });
-
   } catch (err) {
     console.error("❌ Controller Error:", err);
-    return res.status(500).json({
-      error: "Internal server error",
-      details: err.message,
-    });
+    return res.status(500).json({ error: "Internal server error", details: err.message });
   }
 }

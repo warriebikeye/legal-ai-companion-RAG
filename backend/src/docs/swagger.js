@@ -19,8 +19,29 @@ const options = {
         description: 'Production server',
       },
     ],
+
+    // =========================================================
+    // ✅ ADD: Cookie auth scheme for passport sessions
+    // =========================================================
+    components: {
+      securitySchemes: {
+        cookieAuth: {
+          type: "apiKey",
+          in: "cookie",
+          name: "connect.sid", // ✅ express-session default cookie name
+        },
+      },
+    },
+
+    // =========================================================
+    // ✅ OPTIONAL: set cookieAuth as default for all endpoints
+    // You can remove this if you want only some endpoints protected
+    // =========================================================
+    security: [
+      { cookieAuth: [] }
+    ],
   },
-  apis: ['./src/routes/*.js'], // This tells swagger-jsdoc where to look for comments
+  apis: ['./src/routes/*.js'],
 };
 
 const specs = swaggerJsdoc(options);
