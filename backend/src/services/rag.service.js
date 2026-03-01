@@ -12,7 +12,6 @@ const CACHE_TTL = 60 * 60; // 1 hour
 /* =========================================================
    ✅ Helpers for Conversation
    ========================================================= */
-
 function buildHistoryText(messages, summary = "") {
   const lines = messages.map((m) => {
     const who = m.role === "user" ? "User" : m.role === "assistant" ? "Assistant" : "System";
@@ -32,12 +31,12 @@ async function getOrCreateConversation({ conversationId, userId, country }) {
     if (convo) return convo;
   }
 
-  // ✅ Create a new conversation with default title "New Chat"
+  // Create a new conversation with default title
   return Conversation.create({
     userId,
     country: (country || "nigeria").toLowerCase(),
-    title: "New Chat",      // Will update title later if first user message
-    summary: "",            // Optional summary
+    title: "New Chat", // Will update title after first message
+    summary: "",
     lastMessageAt: new Date(),
   });
 }
@@ -61,12 +60,12 @@ async function appendMessage({
     documentText,
   });
 
-  const convo = await Conversation.findOne({ _id: conversationId, userId });
+  let convo = await Conversation.findOne({ _id: conversationId, userId });
 
-  // ✅ If this is the first user message, set title/summary
+  // ✅ If first user message, update title & summary
   if (role === "user" && convo && convo.title === "New Chat") {
     convo.title = content.slice(0, 100); // first 100 chars as title
-    convo.summary = content;             // first message as summary
+    convo.summary = content;             // full first message as summary
     await convo.save();
   }
 
@@ -89,14 +88,7 @@ async function loadRecentMessages({ conversationId, userId, limit = 12 }) {
 
 /* =========================================================
    ✅ RAG with Conversation Persistence
-   - creates/loads conversation
-   - saves user message
-   - loads recent history
-   - runs RAG
-   - saves assistant message
-   - returns answer + sources + conversationId
    ========================================================= */
-
 export async function getRAGAnswer(
   query,
   country = "nigeria",
@@ -119,7 +111,7 @@ export async function getRAGAnswer(
   if (useConversation) {
     convo = await getOrCreateConversation({ conversationId, userId, country });
 
-    // ✅ Save the user's message
+    // Save user message
     await appendMessage({
       conversationId: convo._id,
       userId,
@@ -128,7 +120,10 @@ export async function getRAGAnswer(
       documentText: extraContext || "",
     });
 
-    // ✅ Load recent messages for context
+    // ✅ Reload convo to get updated title/summary after first message
+    convo = await Conversation.findOne({ _id: convo._id, userId });
+
+    // Load recent messages for context
     const recentMsgs = await loadRecentMessages({
       conversationId: convo._id,
       userId,
@@ -199,17 +194,20 @@ IMPORTANT RULES:
     console.log("💡 Generating response");
     const answer = await geminiLLM.getAnswer(query, fullContext, systemPrompt);
 
+    // ✅ Include conversationId and title for frontend
     const response = {
       answer,
       sources,
-      ...(useConversation && convo ? { conversationId: String(convo._id) } : {}),
+      ...(useConversation && convo
+        ? { conversationId: String(convo._id), title: convo.title }
+        : {}),
     };
 
     if (!isConversational) {
       await redis.set(cacheKey, JSON.stringify(response), { ex: CACHE_TTL });
     }
 
-    // ✅ Save assistant message
+    // Save assistant message
     if (useConversation && convo) {
       await appendMessage({
         conversationId: convo._id,
