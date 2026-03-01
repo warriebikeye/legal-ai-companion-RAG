@@ -24,80 +24,23 @@ function buildHistoryText(messages) {
  */
 export async function handleTextQuery(req, res) {
   try {
-    const userId = req.user?._id; // ✅ from passport
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
     const query = req.body.query;
-    const country = (req.body.country || "nigeria").toLowerCase();
-    const conversationIdFromClient = req.body.conversationId || null;
+    const extraContext = req.body.extraContext || "";
 
-    if (!query || query.trim().length === 0) {
-      return res.status(400).json({ error: "Query is required" });
+    // ✅ Get user ID from passport session
+    const userId = req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ error: "User must be logged in." });
     }
 
-    // ✅ create or load conversation
-    const convo = await getOrCreateConversation({
-      conversationId: conversationIdFromClient,
-      userId,
-      country,
+    const response = await getRAGAnswer(query, "nigeria", extraContext, {
+      userId,                // <-- critical
+      conversationId: req.body.conversationId || null,
     });
 
-    let extractedText = "";
-    let clauseAnalysis = null;
-
-    if (req.files && req.files.length > 0) {
-      extractedText = await extractor.extract(req.files);
-
-      if (extractedText.trim()) {
-        clauseAnalysis = await clauseChecker.checkIllegalClauses(extractedText, country);
-      }
-    }
-
-    // ✅ save user message
-    await appendMessage({
-      conversationId: convo._id,
-      userId,
-      role: "user",
-      content: query,
-      documentText: extractedText || "",
-    });
-
-    // ✅ load last messages for history
-    const recentMsgs = await loadRecentMessages({
-      conversationId: convo._id,
-      userId,
-      limit: 12,
-    });
-
-    const historyText = buildHistoryText(recentMsgs);
-
-    // ✅ ask RAG with history
-    const ragResponse = await getRAGAnswer(query, country, extractedText, historyText);
-
-    const answer = ragResponse?.answer || "No answer generated.";
-    const sources = ragResponse?.sources || [];
-
-    // ✅ save assistant response
-    await appendMessage({
-      conversationId: convo._id,
-      userId,
-      role: "assistant",
-      content: answer,
-      sources,
-      clauseAnalysis: clauseAnalysis || null,
-      documentText: extractedText || "",
-    });
-
-    return res.json({
-      success: true,
-      conversationId: String(convo._id),
-      answer,
-      sources,
-      documentText: extractedText || null,
-      clauseAnalysis: clauseAnalysis || null,
-    });
+    res.json(response);
   } catch (err) {
     console.error("❌ Controller Error:", err);
-    return res.status(500).json({ error: "Internal server error", details: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
