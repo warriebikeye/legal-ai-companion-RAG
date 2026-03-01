@@ -1,44 +1,26 @@
 import Tesseract from "tesseract.js";
 import fs from "fs/promises";
 import path from "path";
-
-// ✅ pdfjs-dist works reliably on Render/Node without pdf-parse debug behavior
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import pdf from "../utils/pdfParseWrapper.cjs";
 
 /**
- * Extract per-page text using pdfjs
- * @param {Uint8Array} data
- * @returns {Promise<Array<{text: string, page: number}>>}
+ * Extract text from PDF using Node-safe parser
+ * @param {Buffer} buffer
+ * @returns {Promise<string>}
  */
-async function extractPdfPages(data) {
-  const loadingTask = getDocument({ data });
-  const pdfDoc = await loadingTask.promise;
+async function extractPdfText(buffer) {
+  const data = await pdf(buffer);
 
-  const pages = [];
-  for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-    const page = await pdfDoc.getPage(pageNum);
-    const content = await page.getTextContent();
-
-    // Join extracted text items
-    const text = content.items
-      .map((item) => (typeof item.str === "string" ? item.str : ""))
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    pages.push({ text, page: pageNum });
-  }
-
-  return pages;
+  return (data.text || "")
+    .replace(/\s+/g, " ")
+    .replace(/[\x00-\x1F\x7F]/g, "")
+    .trim();
 }
 
 export class ExtractionService {
+  // ✅ CHANGED: simplified — no rendering, just raw extraction
   async extractFromPDF(buffer) {
-    const data = new Uint8Array(buffer);
-    const pages = await extractPdfPages(data);
-
-    // If you want a single combined string:
-    return pages.map((p) => p.text).filter(Boolean).join("\n\n");
+    return await extractPdfText(buffer);
   }
 
   async extractFromTXT(buffer) {
@@ -46,6 +28,7 @@ export class ExtractionService {
   }
 
   async extractFromImage(buffer) {
+    // OCR path remains unchanged (this is correct usage)
     const result = await Tesseract.recognize(buffer, "eng");
     return result?.data?.text || "";
   }
@@ -71,7 +54,7 @@ export class ExtractionService {
 
       finalText += "\n\n";
 
-      // optional: delete temp file here if you want (only if multer stores temp files)
+      // optional cleanup if multer stores temp files
       // await fs.unlink(absPath);
     }
 

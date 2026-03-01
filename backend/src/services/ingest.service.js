@@ -2,10 +2,9 @@ import fs from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import dotenv from "dotenv";
+import pdf from "../utils/pdfParseWrapper.cjs";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { qdrant } from "../vectorstore/qdrant.js";
-
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 dotenv.config();
 
@@ -22,25 +21,32 @@ function cleanText(text) {
 }
 
 /**
- * PDF → [{ text, page }]
+ * ✅ CHANGED: Simpler + Node-safe PDF extraction using pdf-parse
+ * Instead of rendering pages like pdfjs, we extract raw text once
+ * and split into logical chunks.
  */
 async function extractPdfChunks(fileBuffer) {
-  const data = new Uint8Array(fileBuffer);
-  const loadingTask = getDocument({ data });
-  const pdfDoc = await loadingTask.promise;
+  const data = await pdf(fileBuffer);
+
+  // pdf-parse already merges all page text safely
+  const fullText = cleanText(data.text);
+
+  // Split into semantic chunks (better for embeddings than per-page)
+  const chunkSize = 1200; // ideal for Gemini embeddings
+  const overlap = 200;
 
   const chunks = [];
-  for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-    const page = await pdfDoc.getPage(pageNum);
-    const content = await page.getTextContent();
+  let index = 0;
 
-    const text = content.items
-      .map((item) => (typeof item.str === "string" ? item.str : ""))
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
+  while (index < fullText.length) {
+    const slice = fullText.slice(index, index + chunkSize);
 
-    if (text) chunks.push({ text, page: pageNum });
+    chunks.push({
+      text: slice,
+      page: Math.floor(index / 3000) + 1, // pseudo-page reference
+    });
+
+    index += chunkSize - overlap;
   }
 
   return chunks;
@@ -89,7 +95,7 @@ export async function ingestFile(file, country) {
     let rawChunks = [];
 
     if (file.mimetype === "application/pdf") {
-      rawChunks = await extractPdfChunks(fileBuffer);
+      rawChunks = await extractPdfChunks(fileBuffer); // ✅ now uses pdf-parse pipeline
     } else if (file.mimetype.startsWith("text/")) {
       rawChunks = [{ text: fileBuffer.toString("utf8"), page: 1 }];
     } else {
@@ -114,47 +120,33 @@ export async function ingestFile(file, country) {
     for (let i = 0; i < paragraphs.length; i++) {
       let { text: chunk, page } = paragraphs[i];
 
-      if (chunk.length > 3000) {
-        console.warn(`⚠️ Chunk ${i} too long (${chunk.length} chars). Truncating.`);
-        chunk = chunk.slice(0, 3000);
+      // ✅ safer truncation aligned to embedding limits
+      if (chunk.length > 2000) {
+        chunk = chunk.slice(0, 2000);
       }
 
-      let success = false;
-      let retries = 0;
-      const maxRetries = 5;
+      try {
+        const result = await embeddingModel.embedContent({
+          content: { parts: [{ text: chunk }] },
+        });
 
-      while (!success && retries < maxRetries) {
-        try {
-          const result = await embeddingModel.embedContent({
-            content: { parts: [{ text: chunk }] },
-          });
+        const vector = result.embedding.values;
 
-          const vector = result.embedding.values;
+        points.push({
+          id: uuidv4(),
+          vector,
+          payload: {
+            text: chunk,
+            country,
+            source: file.originalname,
+            page,
+          },
+        });
 
-          points.push({
-            id: uuidv4(),
-            vector,
-            payload: {
-              text: chunk,
-              country,
-              source: file.originalname,
-              page,
-            },
-          });
-
-          success = true;
-          await new Promise((resolve) => setTimeout(resolve, 300));
-        } catch (err) {
-          if (String(err?.message || "").includes("429")) {
-            retries++;
-            const backoff = 1000 * retries ** 2;
-            console.warn(`⏳ 429 rate limit hit. Retrying chunk ${i} in ${backoff} ms (attempt ${retries})`);
-            await new Promise((resolve) => setTimeout(resolve, backoff));
-          } else {
-            console.error(`⚠️ Embedding failed for chunk ${i}: ${err.message}`);
-            break;
-          }
-        }
+        // ✅ smoother rate limiting (prevents Gemini 429 storms)
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      } catch (err) {
+        console.error(`⚠️ Embedding failed for chunk ${i}: ${err.message}`);
       }
     }
 
