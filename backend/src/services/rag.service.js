@@ -7,6 +7,9 @@ import Message from "../models/Message.js";
 
 const CACHE_TTL = 60 * 60; // 1 hour
 
+/* =========================================================
+   Helpers
+========================================================= */
 function buildHistoryText(messages, summary = "") {
   const lines = messages.map((m) => {
     const who = m.role === "user" ? "User" : m.role === "assistant" ? "Assistant" : "System";
@@ -39,7 +42,6 @@ async function appendMessage({
     documentText,
   });
 
-  // Update lastMessageAt timestamp
   await Conversation.updateOne(
     { _id: conversationId, userId },
     { $set: { lastMessageAt: new Date() } }
@@ -53,12 +55,13 @@ async function loadRecentMessages({ conversationId, userId, limit = 12 }) {
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
+
   return msgs.reverse();
 }
 
 /* =========================================================
-   ✅ RAG with first message as title
-   ========================================================= */
+   RAG with first message as title
+========================================================= */
 export async function getRAGAnswer(
   query,
   country = "nigeria",
@@ -80,16 +83,23 @@ export async function getRAGAnswer(
   if (useConversation) {
     const userMessage = userMessageOverride || query;
 
-    // ✅ Create conversation immediately when first message is sent
-    convo = await Conversation.create({
-      userId,
-      country: (country || "nigeria").toLowerCase(),
-      title: userMessage.length > 100 ? userMessage.slice(0, 100) : userMessage,
-      summary: userMessage, // full first message
-      lastMessageAt: new Date(),
-    });
+    // ✅ If conversationId is provided, try to load it
+    if (conversationId) {
+      convo = await Conversation.findOne({ _id: conversationId, userId });
+    }
 
-    // Save the first user message
+    // ✅ If no existing conversation, create one using first message as title
+    if (!convo) {
+      convo = await Conversation.create({
+        userId,
+        country: (country || "nigeria").toLowerCase(),
+        title: userMessage.length > 100 ? userMessage.slice(0, 100) : userMessage,
+        summary: userMessage,
+        lastMessageAt: new Date(),
+      });
+    }
+
+    // ✅ Save the user message
     await appendMessage({
       conversationId: convo._id,
       userId,
@@ -98,7 +108,7 @@ export async function getRAGAnswer(
       documentText: extraContext || "",
     });
 
-    // Load messages for context (just the first message for now)
+    // ✅ Load recent messages for context
     const recentMsgs = await loadRecentMessages({
       conversationId: convo._id,
       userId,
@@ -153,14 +163,16 @@ Use the provided context to answer the user's question clearly and accurately.`;
     const response = {
       answer,
       sources,
-      ...(useConversation && convo ? { conversationId: String(convo._id), title: convo.title } : {}),
+      ...(useConversation && convo
+        ? { conversationId: String(convo._id), title: convo.title }
+        : {}),
     };
 
     if (!isConversational) {
       await redis.set(cacheKey, JSON.stringify(response), { ex: CACHE_TTL });
     }
 
-    // Save assistant message
+    // ✅ Save assistant message
     if (useConversation && convo) {
       await appendMessage({
         conversationId: convo._id,
