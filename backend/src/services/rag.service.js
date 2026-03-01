@@ -32,10 +32,12 @@ async function getOrCreateConversation({ conversationId, userId, country }) {
     if (convo) return convo;
   }
 
+  // ✅ Create a new conversation with default title "New Chat"
   return Conversation.create({
     userId,
     country: (country || "nigeria").toLowerCase(),
-    title: "New Chat",
+    title: "New Chat",      // Will update title later if first user message
+    summary: "",            // Optional summary
     lastMessageAt: new Date(),
   });
 }
@@ -58,6 +60,15 @@ async function appendMessage({
     clauseAnalysis,
     documentText,
   });
+
+  const convo = await Conversation.findOne({ _id: conversationId, userId });
+
+  // ✅ If this is the first user message, set title/summary
+  if (role === "user" && convo && convo.title === "New Chat") {
+    convo.title = content.slice(0, 100); // first 100 chars as title
+    convo.summary = content;             // first message as summary
+    await convo.save();
+  }
 
   await Conversation.updateOne(
     { _id: conversationId, userId },
@@ -86,23 +97,6 @@ async function loadRecentMessages({ conversationId, userId, limit = 12 }) {
    - returns answer + sources + conversationId
    ========================================================= */
 
-/**
- * getRAGAnswer
- *
- * Backward compatible signature, but now supports conversation:
- *
- * @param {string} query
- * @param {string} country
- * @param {string} extraContext (extracted uploaded text)
- * @param {object} options
- * @param {string} options.userId (required for conversation)
- * @param {string|null} options.conversationId
- * @param {number} options.historyLimit
- * @param {string} options.userMessageOverride (optional)
- * @param {any} options.clauseAnalysis (optional store with assistant msg)
- *
- * @returns {object} { answer, sources, conversationId }
- */
 export async function getRAGAnswer(
   query,
   country = "nigeria",
@@ -117,18 +111,15 @@ export async function getRAGAnswer(
     clauseAnalysis = null,
   } = options;
 
-  // ✅ If userId not provided, fall back to original non-conversation behavior
-  // (useful for internal tests or unauth flows)
   const useConversation = Boolean(userId);
 
-  // ✅ Determine conversational history text (only if conversation enabled)
   let historyText = "";
   let convo = null;
 
   if (useConversation) {
     convo = await getOrCreateConversation({ conversationId, userId, country });
 
-    // Save the user's message to DB (what user typed)
+    // ✅ Save the user's message
     await appendMessage({
       conversationId: convo._id,
       userId,
@@ -137,7 +128,7 @@ export async function getRAGAnswer(
       documentText: extraContext || "",
     });
 
-    // Load recent messages to provide continuity
+    // ✅ Load recent messages for context
     const recentMsgs = await loadRecentMessages({
       conversationId: convo._id,
       userId,
@@ -149,7 +140,6 @@ export async function getRAGAnswer(
 
   const isConversational = Boolean(historyText && historyText.trim());
 
-  // ✅ Cache key (cache only if NOT conversational)
   const cacheKey = `answer::${country}::${query}::${extraContext.slice(0, 200)}`;
 
   if (!isConversational) {
@@ -160,7 +150,6 @@ export async function getRAGAnswer(
     }
   }
 
-  // ✅ Gemini-only embedding
   let vector;
   const collection = `legal_chunks_${country.toLowerCase()}-gm`;
   console.log("💡getting vector");
@@ -172,7 +161,6 @@ export async function getRAGAnswer(
     throw err;
   }
 
-  // ✅ Search Qdrant with Gemini vectors
   console.log("💡 searching qdrant");
   const results = await qdrant.search(collection, {
     vector,
@@ -183,7 +171,6 @@ export async function getRAGAnswer(
   const contextChunks = results.map((r) => r.payload.text);
   const ragContext = contextChunks.join("\n\n");
 
-  // ✅ Sources: unique document names
   const sources = [
     ...new Set(
       results
@@ -203,7 +190,6 @@ IMPORTANT RULES:
 - The list of source document IDs will be handled separately by the system. Do not mention or reference them inside the main answer.
 - If conversation history is provided, remain consistent with it and treat the user's latest message as a follow-up when applicable.`;
 
-  // ✅ Final context: history + uploaded doc text + legal context
   const fullContext =
     (historyText ? `CONVERSATION HISTORY:\n${historyText}\n\n` : "") +
     (extraContext ? `UPLOADED DOCUMENT TEXT:\n${extraContext}\n\n` : "") +
@@ -219,12 +205,11 @@ IMPORTANT RULES:
       ...(useConversation && convo ? { conversationId: String(convo._id) } : {}),
     };
 
-    // ✅ Cache only if not conversational
     if (!isConversational) {
       await redis.set(cacheKey, JSON.stringify(response), { ex: CACHE_TTL });
     }
 
-    // ✅ Save assistant response if conversation enabled
+    // ✅ Save assistant message
     if (useConversation && convo) {
       await appendMessage({
         conversationId: convo._id,
