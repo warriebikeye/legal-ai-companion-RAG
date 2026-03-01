@@ -2,16 +2,11 @@
 import { qdrant } from "../vectorstore/qdrant.js";
 import redis from "./redis.js";
 import * as geminiLLM from "../llm/gemini.js";
-
-// ✅ Conversation persistence
 import Conversation from "../models/Conversation.js";
 import Message from "../models/Message.js";
 
 const CACHE_TTL = 60 * 60; // 1 hour
 
-/* =========================================================
-   ✅ Helpers for Conversation
-   ========================================================= */
 function buildHistoryText(messages, summary = "") {
   const lines = messages.map((m) => {
     const who = m.role === "user" ? "User" : m.role === "assistant" ? "Assistant" : "System";
@@ -23,22 +18,6 @@ function buildHistoryText(messages, summary = "") {
   }
 
   return lines.join("\n");
-}
-
-async function getOrCreateConversation({ conversationId, userId, country }) {
-  if (conversationId) {
-    const convo = await Conversation.findOne({ _id: conversationId, userId });
-    if (convo) return convo;
-  }
-
-  // Create a new conversation with default title
-  return Conversation.create({
-    userId,
-    country: (country || "nigeria").toLowerCase(),
-    title: "New Chat", // Will update title after first message
-    summary: "",
-    lastMessageAt: new Date(),
-  });
 }
 
 async function appendMessage({
@@ -60,15 +39,7 @@ async function appendMessage({
     documentText,
   });
 
-  let convo = await Conversation.findOne({ _id: conversationId, userId });
-
-  // ✅ If first user message, update title & summary
-  if (role === "user" && convo && convo.title === "New Chat") {
-    convo.title = content.slice(0, 100); // first 100 chars as title
-    convo.summary = content;             // full first message as summary
-    await convo.save();
-  }
-
+  // Update lastMessageAt timestamp
   await Conversation.updateOne(
     { _id: conversationId, userId },
     { $set: { lastMessageAt: new Date() } }
@@ -82,12 +53,11 @@ async function loadRecentMessages({ conversationId, userId, limit = 12 }) {
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
-
   return msgs.reverse();
 }
 
 /* =========================================================
-   ✅ RAG with Conversation Persistence
+   ✅ RAG with first message as title
    ========================================================= */
 export async function getRAGAnswer(
   query,
@@ -104,26 +74,31 @@ export async function getRAGAnswer(
   } = options;
 
   const useConversation = Boolean(userId);
-
-  let historyText = "";
   let convo = null;
+  let historyText = "";
 
   if (useConversation) {
-    convo = await getOrCreateConversation({ conversationId, userId, country });
+    const userMessage = userMessageOverride || query;
 
-    // Save user message
+    // ✅ Create conversation immediately when first message is sent
+    convo = await Conversation.create({
+      userId,
+      country: (country || "nigeria").toLowerCase(),
+      title: userMessage.length > 100 ? userMessage.slice(0, 100) : userMessage,
+      summary: userMessage, // full first message
+      lastMessageAt: new Date(),
+    });
+
+    // Save the first user message
     await appendMessage({
       conversationId: convo._id,
       userId,
       role: "user",
-      content: userMessageOverride || query,
+      content: userMessage,
       documentText: extraContext || "",
     });
 
-    // ✅ Reload convo to get updated title/summary after first message
-    convo = await Conversation.findOne({ _id: convo._id, userId });
-
-    // Load recent messages for context
+    // Load messages for context (just the first message for now)
     const recentMsgs = await loadRecentMessages({
       conversationId: convo._id,
       userId,
@@ -134,20 +109,15 @@ export async function getRAGAnswer(
   }
 
   const isConversational = Boolean(historyText && historyText.trim());
-
   const cacheKey = `answer::${country}::${query}::${extraContext.slice(0, 200)}`;
 
   if (!isConversational) {
     const cached = await redis.get(cacheKey);
-    if (cached) {
-      console.log("💡 Served from Redis cache");
-      return typeof cached === "string" ? JSON.parse(cached) : cached;
-    }
+    if (cached) return typeof cached === "string" ? JSON.parse(cached) : cached;
   }
 
   let vector;
   const collection = `legal_chunks_${country.toLowerCase()}-gm`;
-  console.log("💡getting vector");
 
   try {
     vector = await geminiLLM.getEmbedding(query);
@@ -156,7 +126,6 @@ export async function getRAGAnswer(
     throw err;
   }
 
-  console.log("💡 searching qdrant");
   const results = await qdrant.search(collection, {
     vector,
     top: 5,
@@ -167,23 +136,11 @@ export async function getRAGAnswer(
   const ragContext = contextChunks.join("\n\n");
 
   const sources = [
-    ...new Set(
-      results
-        .map((r) => r.payload.source)
-        .filter(Boolean)
-    ),
+    ...new Set(results.map((r) => r.payload.source).filter(Boolean)),
   ];
 
   const systemPrompt = `You are a legal assistant providing information based on ${country.toUpperCase()}'s laws.
-
-Use the provided context to answer the user's question clearly and accurately.
-
-IMPORTANT RULES:
-- Do NOT include any file names, document IDs, or source codes in your answer.
-- Only include citations or references if they are legal sections (e.g., "Section 35 of the Constitution").
-- The assistant response must be a clean explanation or legal guidance only.
-- The list of source document IDs will be handled separately by the system. Do not mention or reference them inside the main answer.
-- If conversation history is provided, remain consistent with it and treat the user's latest message as a follow-up when applicable.`;
+Use the provided context to answer the user's question clearly and accurately.`;
 
   const fullContext =
     (historyText ? `CONVERSATION HISTORY:\n${historyText}\n\n` : "") +
@@ -191,16 +148,12 @@ IMPORTANT RULES:
     `LEGAL CONTEXT:\n${ragContext}`;
 
   try {
-    console.log("💡 Generating response");
     const answer = await geminiLLM.getAnswer(query, fullContext, systemPrompt);
 
-    // ✅ Include conversationId and title for frontend
     const response = {
       answer,
       sources,
-      ...(useConversation && convo
-        ? { conversationId: String(convo._id), title: convo.title }
-        : {}),
+      ...(useConversation && convo ? { conversationId: String(convo._id), title: convo.title } : {}),
     };
 
     if (!isConversational) {
