@@ -104,7 +104,7 @@ export async function getRAGAnswer(
       convo = await Conversation.create({
         userId,
         country: (country || "nigeria").toLowerCase(),
-        title: userMessage.slice(0, 100),
+        title: userMessage.slice(0, 30),
         summary: userMessage,
         lastMessageAt: new Date(),
       });
