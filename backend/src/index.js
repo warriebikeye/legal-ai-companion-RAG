@@ -1,8 +1,3 @@
-// src/index.js
-
-/* =========================================================
-   Load ENV FIRST before ALL imports
-========================================================= */
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -10,13 +5,16 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-dotenv.config({
-  path: path.resolve(__dirname, "../.env"),
-});
+dotenv.config();
 
+console.log("ENV PATH TEST");
+console.log(
+  "FLW_SECRET_KEY:",
+  process.env.FLW_SECRET_KEY
+);
 console.log("DOTENV TEST:", {
   GEMINI: !!process.env.GEMINI_API_KEY,
-  MONGO: !!process.env.MONGODB_URI,
+  MONGO: !!process.env.MONGODB_URI
 });
 /* =========================================================
    Core Packages
@@ -27,7 +25,8 @@ import session from "express-session";
 import cors from "cors";
 import mongoose from "mongoose";
 import MongoStore from "connect-mongo";
-
+import subscriptionRoutes from "./routes/subscription.routes.js";
+import paymentRoutes from "./routes/payment.routes.js";
 /* =========================================================
    Swagger
 ========================================================= */
@@ -98,7 +97,7 @@ async function startServer() {
     const corsOptions = {
       origin:
         process.env.NODE_ENV ===
-        "production"
+          "production"
           ? process.env.CLIENT_URL_PROD
           : process.env.CLIENT_URL_TEST,
 
@@ -161,7 +160,7 @@ async function startServer() {
 
           sameSite:
             process.env.NODE_ENV ===
-            "production"
+              "production"
               ? "none"
               : "lax",
 
@@ -204,6 +203,9 @@ async function startServer() {
     app.use("/report", violationRoutes);
 
     app.use("/", conversationRoutes);
+
+    app.use("/subscription", subscriptionRoutes);
+    app.use("/payments", paymentRoutes);
 
     console.log(
       "✅ API routes registered"
@@ -250,9 +252,8 @@ async function startServer() {
       );
 
       console.log(
-        `🌍 Environment: ${
-          process.env.NODE_ENV ||
-          "development"
+        `🌍 Environment: ${process.env.NODE_ENV ||
+        "development"
         }`
       );
 

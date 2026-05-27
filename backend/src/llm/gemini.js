@@ -1,8 +1,19 @@
+// src/llm/gemini.js
+
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+import {
+  AI_MODELS,
+} from "../config/ai.config.js";
+
+import {
+  getEmbeddingModel,
+} from "../services/model-router.service.js";
+
 /* =========================================================
-   Simple Gemini Logger
+   Logger
 ========================================================= */
+
 function log(step, data = null) {
   const timestamp = new Date().toISOString();
 
@@ -19,61 +30,92 @@ function log(step, data = null) {
 }
 
 /* =========================================================
-   Lazy Gemini Initialization
+   Gemini Singleton
 ========================================================= */
 
 let genAI = null;
-let chatModel = null;
-let embedModel = null;
+
+/* =========================================================
+   Model Cache
+========================================================= */
+
+const modelCache = new Map();
+
+/* =========================================================
+   Initialize Gemini
+========================================================= */
 
 function initializeGemini() {
-  if (
-    genAI &&
-    chatModel &&
-    embedModel
-  ) {
+  if (genAI) {
     return;
   }
 
   const apiKey =
     process.env.GEMINI_API_KEY;
 
-  console.log(
-    "API KEY EXISTS:",
-    !!apiKey
-  );
-
   if (!apiKey) {
     throw new Error(
-      "GEMINI_API_KEY is missing from environment variables."
+      "GEMINI_API_KEY missing from environment variables."
     );
   }
 
   log("Initializing Gemini client");
 
-  genAI = new GoogleGenerativeAI(
-    apiKey
-  );
-
-  log("Creating Gemini chat model");
-
-  chatModel =
-    genAI.getGenerativeModel({
-      model: "gemini-2.5-pro",
-    });
+  genAI =
+    new GoogleGenerativeAI(
+      apiKey
+    );
 
   log(
-    "Creating Gemini embedding model"
+    "Gemini client initialized successfully"
   );
+}
 
-  embedModel =
-    genAI.getGenerativeModel({
-      model:
-        "gemini-embedding-001",
+/* =========================================================
+   Get Cached Model
+========================================================= */
+
+function getModel(modelName) {
+  initializeGemini();
+
+  if (
+    modelCache.has(modelName)
+  ) {
+    log("Using cached model", {
+      modelName,
     });
 
-  log(
-    "Gemini models initialized successfully"
+    return modelCache.get(
+      modelName
+    );
+  }
+
+  log("Creating Gemini model", {
+    modelName,
+  });
+
+  const model =
+    genAI.getGenerativeModel({
+      model: modelName,
+    });
+
+  modelCache.set(
+    modelName,
+    model
+  );
+
+  return model;
+}
+
+/* =========================================================
+   Estimate Tokens
+========================================================= */
+
+function estimateTokens(
+  text = ""
+) {
+  return Math.ceil(
+    text.length / 4
   );
 }
 
@@ -87,18 +129,25 @@ export async function getEmbedding(
   const started = Date.now();
 
   try {
-    initializeGemini();
+    const modelName =
+      getEmbeddingModel();
+
+    const embedModel =
+      getModel(modelName);
 
     log(
       "Embedding request started",
       {
+        modelName,
+
         textLength:
           text?.length || 0,
 
-        preview: text?.slice(
-          0,
-          120
-        ),
+        estimatedTokens:
+          estimateTokens(text),
+
+        preview:
+          text?.slice(0, 100),
       }
     );
 
@@ -114,6 +163,8 @@ export async function getEmbedding(
     log(
       "✅ Embedding generated successfully",
       {
+        modelName,
+
         vectorLength:
           embedding.length,
 
@@ -125,10 +176,13 @@ export async function getEmbedding(
     return embedding;
   } catch (err) {
     console.error(
-      "❌ Gemini embedding error:",
+      "❌ Gemini embedding error",
       {
-        message: err?.message,
-        stack: err?.stack,
+        message:
+          err?.message,
+
+        stack:
+          err?.stack,
       }
     );
 
@@ -140,19 +194,30 @@ export async function getEmbedding(
    Generate Answer
 ========================================================= */
 
-export async function getAnswer(
+/* =========================================================
+   Generate Answer
+========================================================= */
+
+export async function getAnswer({
   query,
   context,
-  systemPrompt
-) {
+  systemPrompt,
+  modelName =
+    AI_MODELS.FLASH,
+  fallbackModel =
+    AI_MODELS.FLASH,
+}) {
   const started = Date.now();
 
   try {
-    initializeGemini();
+    const model =
+      getModel(modelName);
 
     log(
       "Gemini answer generation started",
       {
+        modelName,
+
         queryLength:
           query?.length || 0,
 
@@ -162,6 +227,11 @@ export async function getAnswer(
         systemPromptLength:
           systemPrompt?.length || 0,
 
+        estimatedInputTokens:
+          estimateTokens(
+            `${systemPrompt}\n${query}\n${context}`
+          ),
+
         queryPreview:
           query?.slice(0, 120),
       }
@@ -170,29 +240,30 @@ export async function getAnswer(
     const prompt = `
 ${systemPrompt}
 
-Query:
+USER QUERY:
 ${query}
 
-Context:
+CONTEXT:
 ${context}
 `;
 
     log("Prompt constructed", {
-      totalPromptLength:
+      modelName,
+
+      promptLength:
         prompt.length,
     });
 
-    log(
-      "Calling Gemini generateContent"
-    );
-
     const result =
-      await chatModel.generateContent(
+      await model.generateContent(
         prompt
       );
 
     log(
-      "Gemini generateContent completed"
+      "Gemini generateContent completed",
+      {
+        modelName,
+      }
     );
 
     const response =
@@ -202,27 +273,97 @@ ${context}
     log(
       "✅ Gemini response generated",
       {
+        modelName,
+
         responseLength:
           response.length,
+
+        estimatedOutputTokens:
+          estimateTokens(
+            response
+          ),
 
         durationMs:
           Date.now() - started,
       }
     );
 
-    return response;
+    return {
+      response,
+
+      modelUsed: modelName,
+
+      latencyMs:
+        Date.now() - started,
+
+      fallbackUsed: false,
+    };
   } catch (err) {
     console.error(
-      "❌ Gemini answer error:",
+      "❌ Gemini answer error",
       {
-        message: err?.message,
-        stack: err?.stack,
+        modelName,
+
+        message:
+          err?.message,
+
         queryPreview:
           query?.slice(0, 120),
-        contextLength:
-          context?.length || 0,
       }
     );
+
+    /* =====================================================
+       Fallback Model Logic
+    ===================================================== */
+
+    if (
+      modelName !==
+      fallbackModel
+    ) {
+      log(
+        "Primary model failed → trying fallback",
+        {
+          failedModel:
+            modelName,
+
+          fallbackModel,
+        }
+      );
+
+      try {
+        const fallbackResponse =
+          await getAnswer({
+            query,
+            context,
+            systemPrompt,
+            modelName:
+              fallbackModel,
+            fallbackModel,
+          });
+
+        log(
+          "✅ Fallback model succeeded",
+          {
+            fallbackModel,
+          }
+        );
+
+        return {
+          ...fallbackResponse,
+          fallbackUsed: true,
+        };
+      } catch (fallbackErr) {
+        console.error(
+          "❌ Fallback model also failed",
+          {
+            message:
+              fallbackErr?.message,
+          }
+        );
+
+        throw fallbackErr;
+      }
+    }
 
     throw err;
   }

@@ -5,25 +5,35 @@ import redis from "./redis.js";
 import * as geminiLLM from "../llm/gemini.js";
 import Conversation from "../models/Conversation.js";
 import Message from "../models/Message.js";
+import User from "../models/User.js";
 
 const CACHE_TTL = 60 * 60; // 1 hour
 const EMBEDDING_CACHE_TTL = 60 * 60 * 24 * 30; // 30 days
 
-const MAX_HISTORY_MESSAGES = 4;
-
 /* =========================================================
-   Retrieval tuning
+   Tier-based configuration
 ========================================================= */
 
-const SIMILARITY_THRESHOLD = 0.55;
-const TOP_K_RESULTS = 5;
+const FREE_CONFIG = {
+  historyLimit: 4,
+  topK: 3,
+  maxChunkLength: 700,
+  maxExtraContextLength: 1500,
+  similarityThreshold: 0.58,
+};
 
-const MAX_CONTEXT_CHUNK_LENGTH = 1200;
-const MAX_EXTRA_CONTEXT_LENGTH = 2000;
+const PREMIUM_CONFIG = {
+  historyLimit: 10,
+  topK: 8,
+  maxChunkLength: 1500,
+  maxExtraContextLength: 6000,
+  similarityThreshold: 0.50,
+};
 
 /* =========================================================
    Simple logger
 ========================================================= */
+
 function log(step, data = null) {
   const timestamp = new Date().toISOString();
 
@@ -40,8 +50,9 @@ function log(step, data = null) {
 }
 
 /* =========================================================
-   Normalize query for better cache hits
+   Normalize query
 ========================================================= */
+
 function normalizeQuery(text = "") {
   return text
     .toLowerCase()
@@ -51,8 +62,9 @@ function normalizeQuery(text = "") {
 }
 
 /* =========================================================
-   Lightweight small-talk detector
+   Small talk detector
 ========================================================= */
+
 function isSmallTalk(text = "") {
   const normalized = normalizeQuery(text);
 
@@ -72,37 +84,9 @@ function isSmallTalk(text = "") {
 }
 
 /* =========================================================
-   Build compact history
+   Compress context
 ========================================================= */
-function buildHistoryText(
-  messages,
-  summary = ""
-) {
-  const lines = messages.map((m) => {
-    const who =
-      m.role === "user"
-        ? "User"
-        : m.role === "assistant"
-        ? "Assistant"
-        : "System";
 
-    return `${who}: ${m.content}`;
-  });
-
-  if (summary && summary.trim()) {
-    return `SUMMARY SO FAR:
-${summary}
-
-RECENT MESSAGES:
-${lines.join("\n")}`;
-  }
-
-  return lines.join("\n");
-}
-
-/* =========================================================
-   Compress large context
-========================================================= */
 function compressContext(
   text = "",
   maxLength = 4000
@@ -115,8 +99,56 @@ function compressContext(
 }
 
 /* =========================================================
+   Build compact history
+========================================================= */
+
+function buildHistoryText(
+  messages,
+  summary = ""
+) {
+  const lines = messages.map((m) => {
+    const who =
+      m.role === "user"
+        ? "User"
+        : m.role === "assistant"
+          ? "Assistant"
+          : "System";
+
+    return `${who}: ${m.content}`;
+  });
+
+  if (summary?.trim()) {
+    return `SUMMARY SO FAR:
+${summary}
+
+RECENT MESSAGES:
+${lines.join("\n")}`;
+  }
+
+  return lines.join("\n");
+}
+
+/* =========================================================
+   Detect complex request
+========================================================= */
+
+function isComplexRequest({
+  query = "",
+  extraContext = "",
+}) {
+  const combinedLength =
+    query.length + extraContext.length;
+
+  return (
+    combinedLength > 6000 ||
+    extraContext.length > 4000
+  );
+}
+
+/* =========================================================
    Save message
 ========================================================= */
+
 async function appendMessage({
   conversationId,
   userId,
@@ -125,12 +157,14 @@ async function appendMessage({
   sources = [],
   clauseAnalysis = null,
   documentText = "",
+  modelUsed = null,
 }) {
   try {
     log("Saving message", {
       role,
       conversationId:
         String(conversationId),
+      modelUsed,
     });
 
     const msg = await Message.create({
@@ -141,6 +175,7 @@ async function appendMessage({
       sources,
       clauseAnalysis,
       documentText,
+      modelUsed,
     });
 
     await Conversation.updateOne(
@@ -171,10 +206,11 @@ async function appendMessage({
 /* =========================================================
    Load recent messages
 ========================================================= */
+
 async function loadRecentMessages({
   conversationId,
   userId,
-  limit = MAX_HISTORY_MESSAGES,
+  limit,
 }) {
   try {
     log("Loading recent messages", {
@@ -209,6 +245,7 @@ async function loadRecentMessages({
 /* =========================================================
    Main RAG Service
 ========================================================= */
+
 export async function getRAGAnswer(
   query,
   country = "nigeria",
@@ -238,6 +275,34 @@ export async function getRAGAnswer(
     }
 
     /* =========================================================
+       Load user tier
+    ========================================================= */
+
+    const user =
+      await User.findById(userId).lean();
+
+    if (!user) {
+      throw new Error(
+        "User not found."
+      );
+    }
+
+    const userTier =
+      user.subscriptionTier || "free";
+
+    const tierConfig =
+      userTier === "premium"
+        ? PREMIUM_CONFIG
+        : FREE_CONFIG;
+
+    log("User tier loaded", {
+      userId,
+      userTier,
+      dailyPassActive:
+        user.dailyPassActive,
+    });
+
+    /* =========================================================
        Validate input
     ========================================================= */
 
@@ -253,17 +318,14 @@ export async function getRAGAnswer(
       );
     }
 
-    log("Incoming question", {
-      question: userMessage,
-      country,
-      userId,
-      conversationId,
-    });
-
     const normalizedQuery =
       normalizeQuery(userMessage);
 
-    log("Normalized query", {
+    log("Incoming question", {
+      country,
+      userTier,
+      queryLength:
+        userMessage.length,
       normalizedQuery,
     });
 
@@ -296,6 +358,7 @@ export async function getRAGAnswer(
 
       convo = await Conversation.create({
         userId,
+
         country:
           (
             country || "nigeria"
@@ -312,7 +375,7 @@ export async function getRAGAnswer(
       });
 
       log(
-        "New conversation created",
+        "Conversation created",
         {
           conversationId: String(
             convo._id
@@ -335,7 +398,7 @@ export async function getRAGAnswer(
 
       if (!convo) {
         log(
-          "Conversation not found → creating fallback"
+          "Conversation missing → creating fallback"
         );
 
         convo =
@@ -359,20 +422,6 @@ export async function getRAGAnswer(
             lastMessageAt:
               new Date(),
           });
-
-        log(
-          "Fallback conversation created",
-          {
-            conversationId:
-              String(
-                convo._id
-              ),
-          }
-        );
-      } else {
-        log(
-          "Conversation loaded successfully"
-        );
       }
     }
 
@@ -384,11 +433,9 @@ export async function getRAGAnswer(
       await loadRecentMessages({
         conversationId:
           convo._id,
-
         userId,
-
         limit:
-          MAX_HISTORY_MESSAGES,
+          tierConfig.historyLimit,
       });
 
     const shouldUseCache =
@@ -396,15 +443,19 @@ export async function getRAGAnswer(
 
     log("Cache decision", {
       shouldUseCache,
-      previousMessageCount:
+      previousMessages:
         recentMsgsBeforeSave.length,
     });
 
     /* =========================================================
-       Response cache check
+       Cache key
     ========================================================= */
 
-    const cacheKey = `answer::${country.toLowerCase()}::${normalizedQuery}`;
+    const cacheKey = `answer::${userTier}::${country.toLowerCase()}::${normalizedQuery}`;
+
+    /* =========================================================
+       Response cache
+    ========================================================= */
 
     if (shouldUseCache) {
       log("Checking response cache", {
@@ -428,6 +479,7 @@ export async function getRAGAnswer(
             convo._id
           ),
           title: convo.title,
+          cacheHit: true,
         };
       }
 
@@ -448,18 +500,16 @@ export async function getRAGAnswer(
     });
 
     /* =========================================================
-       Load compact history
+       Reload recent history
     ========================================================= */
 
     const recentMsgs =
       await loadRecentMessages({
         conversationId:
           convo._id,
-
         userId,
-
         limit:
-          MAX_HISTORY_MESSAGES,
+          tierConfig.historyLimit,
       });
 
     const historyText =
@@ -471,7 +521,6 @@ export async function getRAGAnswer(
     log("History prepared", {
       historyLength:
         historyText.length,
-
       recentMessages:
         recentMsgs.length,
     });
@@ -498,106 +547,76 @@ export async function getRAGAnswer(
 
       vector =
         typeof cachedEmbedding ===
-        "string"
+          "string"
           ? JSON.parse(
-              cachedEmbedding
-            )
+            cachedEmbedding
+          )
           : cachedEmbedding;
     } else {
       log("❌ EMBEDDING CACHE MISS");
 
-      try {
-        log(
-          "Generating embedding with Gemini"
+      vector =
+        await geminiLLM.getEmbedding(
+          normalizedQuery
         );
 
-        vector =
-          await geminiLLM.getEmbedding(
-            normalizedQuery
-          );
+      await redis.set(
+        embeddingCacheKey,
+        JSON.stringify(vector),
+        {
+          ex:
+            EMBEDDING_CACHE_TTL,
+        }
+      );
 
-        log(
-          "Embedding generated successfully"
-        );
-
-        await redis.set(
-          embeddingCacheKey,
-          JSON.stringify(vector),
-          {
-            ex:
-              EMBEDDING_CACHE_TTL,
-          }
-        );
-
-        log(
-          "Embedding cached successfully"
-        );
-      } catch (err) {
-        console.error(
-          "❌ Embedding failed with Gemini:",
-          err
-        );
-
-        throw err;
-      }
+      log(
+        "Embedding cached successfully"
+      );
     }
 
     /* =========================================================
-       Vector Search
+       Vector search
     ========================================================= */
 
     const collection = `legal_chunks_${country.toLowerCase()}-gm`;
 
-    log("Starting Qdrant vector search", {
+    log("Starting vector search", {
       collection,
-      topK: TOP_K_RESULTS,
+      topK: tierConfig.topK,
+      similarityThreshold:
+        tierConfig.similarityThreshold,
     });
 
     const results =
       await qdrant.search(collection, {
         vector,
-        top: TOP_K_RESULTS,
+        top: tierConfig.topK,
         with_payload: true,
       });
 
-    log("Qdrant search completed", {
+    log("Vector search completed", {
       resultCount:
         results.length,
-
       topScore:
         results?.[0]?.score || 0,
     });
 
-    log(
-      "Search scores",
-      results.map((r) => ({
-        score: r.score,
-        source:
-          r.payload?.source ||
-          "unknown",
-      }))
-    );
-
     /* =========================================================
-       Filter by threshold
+       Filter search results
     ========================================================= */
 
     const filteredResults =
       results.filter(
         (r) =>
           r.score >=
-          SIMILARITY_THRESHOLD
+          tierConfig.similarityThreshold
       );
 
     log("Filtered results", {
       originalCount:
         results.length,
-
       filteredCount:
         filteredResults.length,
-
-      threshold:
-        SIMILARITY_THRESHOLD,
     });
 
     if (!filteredResults.length) {
@@ -619,12 +638,8 @@ export async function getRAGAnswer(
       };
     }
 
-    log(
-      "✅ Relevant legal matches found"
-    );
-
     /* =========================================================
-       Build compressed context
+       Build RAG context
     ========================================================= */
 
     const contextChunks =
@@ -637,7 +652,7 @@ export async function getRAGAnswer(
         .map((chunk) =>
           compressContext(
             chunk,
-            MAX_CONTEXT_CHUNK_LENGTH
+            tierConfig.maxChunkLength
           )
         );
 
@@ -647,7 +662,7 @@ export async function getRAGAnswer(
     const compressedExtraContext =
       compressContext(
         extraContext,
-        MAX_EXTRA_CONTEXT_LENGTH
+        tierConfig.maxExtraContextLength
       );
 
     const sources = [
@@ -664,12 +679,31 @@ export async function getRAGAnswer(
     log("RAG context prepared", {
       chunkCount:
         contextChunks.length,
-
       ragContextLength:
         ragContext.length,
-
       sourceCount:
         sources.length,
+    });
+
+    /* =========================================================
+       Dynamic task routing
+    ========================================================= */
+
+    const complexRequest =
+      isComplexRequest({
+        query: userMessage,
+        extraContext:
+          compressedExtraContext,
+      });
+
+    const taskType =
+      complexRequest
+        ? "deep_reasoning"
+        : "chat";
+
+    log("Task routing decision", {
+      complexRequest,
+      taskType,
     });
 
     /* =========================================================
@@ -688,7 +722,7 @@ Rules:
 `;
 
     /* =========================================================
-       Prompt construction
+       Full context
     ========================================================= */
 
     const fullContext =
@@ -707,7 +741,7 @@ ${compressedExtraContext}
       `LEGAL CONTEXT:
 ${ragContext}`;
 
-    log("Full prompt prepared", {
+    log("Prompt context prepared", {
       contextLength:
         fullContext.length,
     });
@@ -716,16 +750,26 @@ ${ragContext}`;
        Generate answer
     ========================================================= */
 
-    log("Calling Gemini for answer");
+    log("Calling Gemini");
 
-    const answer =
-      await geminiLLM.getAnswer(
-        userMessage,
-        fullContext,
-        systemPrompt
-      );
+    const {
+      response: answer,
+      modelUsed,
+      latencyMs,
+      fallbackUsed,
+    } =
+      await geminiLLM.getAnswer({
+        query: userMessage,
+        context: fullContext,
+        systemPrompt,
+        userTier,
+        taskType,
+      });
 
-    log("✅ Gemini answer generated", {
+    log("Gemini response received", {
+      modelUsed,
+      latencyMs,
+      fallbackUsed,
       answerLength:
         answer?.length || 0,
     });
@@ -737,6 +781,9 @@ ${ragContext}`;
         convo._id
       ),
       title: convo.title,
+      modelUsed,
+      latencyMs,
+      fallbackUsed,
     };
 
     /* =========================================================
@@ -744,7 +791,7 @@ ${ragContext}`;
     ========================================================= */
 
     if (shouldUseCache) {
-      log("Caching final response");
+      log("Caching response");
 
       await redis.set(
         cacheKey,
@@ -755,7 +802,7 @@ ${ragContext}`;
       );
 
       log(
-        "Final response cached successfully"
+        "Response cached successfully"
       );
     }
 
@@ -769,18 +816,16 @@ ${ragContext}`;
       role: "assistant",
       content: answer,
       sources,
-
-      clauseAnalysis:
-        clauseAnalysis ?? null,
-
+      clauseAnalysis,
       documentText:
         compressedExtraContext ||
         "",
+      modelUsed,
     });
 
     /* =========================================================
-       Conversation auto-summary
-    ========================================================= */
+       Conversation summary
+========================================================= */
 
     const totalMessages =
       await Message.countDocuments({
@@ -804,12 +849,20 @@ Summarize this legal conversation in less than 200 words.
 ${historyText}
 `;
 
-        const summary =
-          await geminiLLM.getAnswer(
-            "Summarize conversation",
-            summaryPrompt,
-            "You are a legal conversation summarizer."
-          );
+        const {
+          response: summary,
+          modelUsed:
+            summaryModel,
+        } =
+          await geminiLLM.getAnswer({
+            query:
+              "Summarize conversation",
+            context: summaryPrompt,
+            systemPrompt:
+              "You are a legal conversation summarizer.",
+            userTier,
+            taskType: "summary",
+          });
 
         await Conversation.updateOne(
           {
@@ -824,7 +877,10 @@ ${historyText}
         );
 
         log(
-          "✅ Conversation summary updated"
+          "Conversation summary updated",
+          {
+            summaryModel,
+          }
         );
       } catch (summaryErr) {
         console.error(
@@ -834,11 +890,17 @@ ${historyText}
       }
     }
 
+    /* =========================================================
+       Request completed
+    ========================================================= */
+
     const totalDuration =
       Date.now() - requestStarted;
 
     log("✅ RAG REQUEST COMPLETED", {
       durationMs: totalDuration,
+      userTier,
+      modelUsed,
     });
 
     log(
@@ -849,7 +911,10 @@ ${historyText}
   } catch (err) {
     console.error(
       "❌ RAG SERVICE FAILED:",
-      err
+      {
+        message: err?.message,
+        stack: err?.stack,
+      }
     );
 
     throw err;

@@ -28,12 +28,26 @@ export function me(req, res) {
     return res.json({ isAuthenticated: false });
   }
 
-  return res.json({
-    isAuthenticated: true,
-    userEmail: req.user.email,
-    userImage: req.user.photo,
-    userId: req.user._id,
-  });
+  res.json({
+  isAuthenticated: true,
+
+  user: req.user,
+
+  userEmail: req.user.email,
+  userImage: req.user.photo,
+
+  subscriptionTier:
+    req.user.subscriptionTier,
+
+  subscriptionStatus:
+    req.user.subscriptionStatus,
+
+  subscriptionPlan:
+    req.user.subscriptionPlan,
+
+  subscriptionExpiresAt:
+    req.user.subscriptionExpiresAt,
+});
 }
 
 
