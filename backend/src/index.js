@@ -1,74 +1,145 @@
 import dotenv from "dotenv";
+
 import path from "path";
+
 import { fileURLToPath } from "url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __filename =
+  fileURLToPath(import.meta.url);
+
+const __dirname =
+  path.dirname(__filename);
 
 dotenv.config();
 
+/* =========================================================
+   QDRANT INIT
+========================================================= */
+
+import {
+  initializeQdrantCollections,
+} from "./vectorstore/qdrant.js";
+import {
+  startVectorCleanupWorker,
+} from "./workers/vectorCleanup.worker.js";
+import {
+  apiRateLimiter,
+} from "./middleware/rateLimiter.js";
+/* =========================================================
+   ENV TESTS
+========================================================= */
+
 console.log("ENV PATH TEST");
+
 console.log(
   "FLW_SECRET_KEY:",
   process.env.FLW_SECRET_KEY
 );
+
 console.log("DOTENV TEST:", {
-  GEMINI: !!process.env.GEMINI_API_KEY,
-  MONGO: !!process.env.MONGODB_URI
+  GEMINI:
+    !!process.env.GEMINI_API_KEY,
+
+  MONGO:
+    !!process.env.MONGODB_URI,
 });
-/* =========================================================
-   Core Packages
-========================================================= */
-import express from "express";
-import passport from "passport";
-import session from "express-session";
-import cors from "cors";
-import mongoose from "mongoose";
-import MongoStore from "connect-mongo";
-import subscriptionRoutes from "./routes/subscription.routes.js";
-import paymentRoutes from "./routes/payment.routes.js";
-/* =========================================================
-   Swagger
-========================================================= */
-import { swaggerUi, specs } from "./docs/swagger.js";
 
 /* =========================================================
-   Routes
+   CORE PACKAGES
 ========================================================= */
+
+import express from "express";
+
+import passport from "passport";
+
+import session from "express-session";
+
+import cors from "cors";
+
+import mongoose from "mongoose";
+
+import MongoStore from "connect-mongo";
+
+/* =========================================================
+   ROUTES
+========================================================= */
+
+import subscriptionRoutes from "./routes/subscription.routes.js";
+
+import paymentRoutes from "./routes/payment.routes.js";
+
 import askRoutes from "./routes/ask.js";
+
 import voiceRoutes from "./routes/voice.js";
+
 import ingestRoutes from "./routes/ingest.js";
+
 import violationRoutes from "./routes/violation.route.js";
+
 import authRoutes from "./routes/auth.routes.js";
+
 import conversationRoutes from "./routes/conversation.routes.js";
 
 /* =========================================================
-   Passport Config
+   SWAGGER
 ========================================================= */
+
+import {
+  swaggerUi,
+  specs,
+} from "./docs/swagger.js";
+
+/* =========================================================
+   PASSPORT CONFIG
+========================================================= */
+
 import "./config/passport.js";
 
 /* =========================================================
-   Startup Logs
+   STARTUP LOGS
 ========================================================= */
-console.log("=========================================");
-console.log("🚀 Starting Legal RAG Backend");
-console.log("=========================================");
 
-console.log("Environment Loaded:", {
-  NODE_ENV: process.env.NODE_ENV,
-  PORT: process.env.PORT,
-  MONGODB_URI_EXISTS: !!process.env.MONGODB_URI,
-  GEMINI_API_KEY_EXISTS:
-    !!process.env.GEMINI_API_KEY,
-  SESSION_SECRET_EXISTS:
-    !!process.env.SESSION_SECRET,
-});
+console.log(
+  "========================================="
+);
+
+console.log(
+  "🚀 Starting Legal RAG Backend"
+);
+
+console.log(
+  "========================================="
+);
+
+console.log(
+  "Environment Loaded:",
+  {
+    NODE_ENV:
+      process.env.NODE_ENV,
+
+    PORT:
+      process.env.PORT,
+
+    MONGODB_URI_EXISTS:
+      !!process.env.MONGODB_URI,
+
+    GEMINI_API_KEY_EXISTS:
+      !!process.env.GEMINI_API_KEY,
+
+    SESSION_SECRET_EXISTS:
+      !!process.env.SESSION_SECRET,
+  }
+);
+
+/* =========================================================
+   START SERVER
+========================================================= */
 
 async function startServer() {
   try {
-    /* =========================================================
-       MongoDB Connection
-    ========================================================= */
+    /* =====================================================
+       MONGODB
+    ===================================================== */
 
     console.log(
       "📦 Connecting to MongoDB..."
@@ -78,11 +149,29 @@ async function startServer() {
       process.env.MONGODB_URI
     );
 
-    console.log("✅ MongoDB connected");
+    console.log(
+      "✅ MongoDB connected"
+    );
 
-    /* =========================================================
-       Express App
-    ========================================================= */
+    /* =====================================================
+       QDRANT INIT
+    ===================================================== */
+
+    console.log(
+      "📦 Initializing Qdrant collections..."
+    );
+
+    await initializeQdrantCollections();
+
+    startVectorCleanupWorker();
+
+    console.log(
+      "✅ Qdrant initialized"
+    );
+
+    /* =====================================================
+       EXPRESS APP
+    ===================================================== */
 
     const app = express();
 
@@ -90,43 +179,83 @@ async function startServer() {
       "⚙️ Express application initialized"
     );
 
-    /* =========================================================
-       CORS Configuration
-    ========================================================= */
+    /* =====================================================
+       TRUST PROXY
+    ===================================================== */
+
+    app.set("trust proxy", 1);
+
+    /* =====================================================
+       CORS
+    ===================================================== */
 
     const corsOptions = {
       origin:
         process.env.NODE_ENV ===
           "production"
-          ? process.env.CLIENT_URL_PROD
-          : process.env.CLIENT_URL_TEST,
+          ? process.env
+            .CLIENT_URL_PROD
+          : process.env
+            .CLIENT_URL_TEST,
 
-      methods: ["GET", "POST"],
+      methods: [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
+      ],
 
       credentials: true,
     };
 
-    console.log("🌍 CORS configured", {
-      origin: corsOptions.origin,
-    });
+    console.log(
+      "🌍 CORS configured",
+      {
+        origin:
+          corsOptions.origin,
+      }
+    );
 
-    app.use(cors(corsOptions));
+    app.use(
+      cors(corsOptions)
+    );
 
+    /* =====================================================
+       JSON MIDDLEWARE
+    ===================================================== */
+
+    app.use(
+      express.json({
+        limit: "50mb",
+      })
+    );
     /* =========================================================
-       JSON Middleware
+       GLOBAL RATE LIMITING
     ========================================================= */
 
-    app.use(express.json());
+    app.use(apiRateLimiter);
 
-    app.set("trust proxy", 1);
+    console.log(
+      "✅ Global API rate limiting enabled"
+    );
+    
+    app.use(
+      express.urlencoded({
+        extended: true,
+
+        limit: "10mb",
+      })
+    );
 
     console.log(
       "✅ JSON middleware configured"
     );
 
-    /* =========================================================
-       Session Configuration
-    ========================================================= */
+    /* =====================================================
+       SESSION CONFIG
+    ===================================================== */
 
     console.log(
       "🛡️ Configuring session middleware..."
@@ -135,21 +264,32 @@ async function startServer() {
     app.use(
       session({
         secret:
-          process.env.SESSION_SECRET ||
+          process.env
+            .SESSION_SECRET ||
           "supersecret",
 
         resave: false,
 
         saveUninitialized: false,
 
-        store: MongoStore.create({
-          mongoUrl:
-            process.env.MONGODB_URI,
+        proxy:
+          process.env.NODE_ENV ===
+          "production",
 
-          collectionName: "sessions",
+        store:
+          MongoStore.create({
+            mongoUrl:
+              process.env
+                .MONGODB_URI,
 
-          ttl: 24 * 60 * 60,
-        }),
+            collectionName:
+              "sessions",
+
+            ttl:
+              24 *
+              60 *
+              60,
+          }),
 
         cookie: {
           secure:
@@ -165,7 +305,10 @@ async function startServer() {
               : "lax",
 
           maxAge:
-            24 * 60 * 60 * 1000,
+            24 *
+            60 *
+            60 *
+            1000,
         },
       })
     );
@@ -174,99 +317,232 @@ async function startServer() {
       "✅ Session middleware configured"
     );
 
-    /* =========================================================
-       Passport Middleware
-    ========================================================= */
+    /* =====================================================
+       PASSPORT
+    ===================================================== */
 
-    app.use(passport.initialize());
+    app.use(
+      passport.initialize()
+    );
 
-    app.use(passport.session());
+    app.use(
+      passport.session()
+    );
 
     console.log(
       "✅ Passport middleware initialized"
     );
 
-    /* =========================================================
-       API Routes
-    ========================================================= */
+    /* =====================================================
+       HEALTH CHECK
+    ===================================================== */
 
-    console.log("🛣️ Registering routes...");
+    app.get(
+      "/health",
+      async (
+        req,
+        res
+      ) => {
+        try {
+          const mongoState =
+            mongoose
+              .connection
+              .readyState;
 
-    app.use("/auth", authRoutes);
+          return res.json({
+            status:
+              "healthy",
 
-    app.use("/ask", askRoutes);
+            uptime:
+              process.uptime(),
 
-    app.use("/ask", voiceRoutes);
+            timestamp:
+              new Date().toISOString(),
 
-    app.use("/ask", ingestRoutes);
+            services: {
+              mongodb:
+                mongoState === 1
+                  ? "connected"
+                  : "disconnected",
 
-    app.use("/report", violationRoutes);
+              qdrant:
+                "connected",
+            },
+          });
+        } catch (err) {
+          return res
+            .status(500)
+            .json({
+              status:
+                "unhealthy",
 
-    app.use("/", conversationRoutes);
+              error:
+                err?.message,
+            });
+        }
+      }
+    );
 
-    app.use("/subscription", subscriptionRoutes);
-    app.use("/payments", paymentRoutes);
+    console.log(
+      "✅ Health check route enabled"
+    );
+
+    /* =====================================================
+       API ROUTES
+    ===================================================== */
+
+    console.log(
+      "🛣️ Registering routes..."
+    );
+
+    app.use(
+      "/auth",
+      authRoutes
+    );
+
+    app.use(
+      "/ask",
+      askRoutes
+    );
+
+    app.use(
+      "/ask",
+      voiceRoutes
+    );
+
+    app.use(
+      "/ask",
+      ingestRoutes
+    );
+
+    app.use(
+      "/report",
+      violationRoutes
+    );
+
+    app.use(
+      "/",
+      conversationRoutes
+    );
+
+    app.use(
+      "/subscription",
+      subscriptionRoutes
+    );
+
+    app.use(
+      "/payments",
+      paymentRoutes
+    );
 
     console.log(
       "✅ API routes registered"
     );
 
-    /* =========================================================
-       Swagger Docs
-    ========================================================= */
+    /* =====================================================
+       SWAGGER DOCS
+    ===================================================== */
 
     app.use(
       "/api-docs",
+
       swaggerUi.serve,
-      swaggerUi.setup(specs)
+
+      swaggerUi.setup(
+        specs
+      )
     );
 
     console.log(
       "✅ Swagger documentation enabled"
     );
 
-    /* =========================================================
-       Root Route
-    ========================================================= */
+    /* =====================================================
+       ROOT ROUTE
+    ===================================================== */
 
-    app.get("/", (req, res) => {
-      res.send(
-        "🌍 Legal RAG backend running."
-      );
-    });
+    app.get(
+      "/",
+      (
+        req,
+        res
+      ) => {
+        res.send(
+          "🌍 Legal RAG backend running."
+        );
+      }
+    );
 
-    /* =========================================================
-       Start Server
-    ========================================================= */
+    /* =====================================================
+       GLOBAL ERROR HANDLER
+    ===================================================== */
+
+    app.use(
+      (
+        err,
+        req,
+        res,
+        next
+      ) => {
+        console.error(
+          "❌ GLOBAL ERROR:",
+          {
+            message:
+              err?.message,
+
+            stack:
+              err?.stack,
+          }
+        );
+
+        return res
+          .status(500)
+          .json({
+            error:
+              "Internal server error",
+          });
+      }
+    );
+
+    /* =====================================================
+       START SERVER
+    ===================================================== */
 
     const PORT =
       process.env.PORT || 5000;
 
-    app.listen(PORT, () => {
-      console.log(
-        "========================================="
-      );
+    app.listen(
+      PORT,
+      () => {
+        console.log(
+          "========================================="
+        );
 
-      console.log(
-        `✅ Server listening on port ${PORT}`
-      );
+        console.log(
+          `✅ Server listening on port ${PORT}`
+        );
 
-      console.log(
-        `🌍 Environment: ${process.env.NODE_ENV ||
-        "development"
-        }`
-      );
+        console.log(
+          `🌍 Environment: ${process.env
+            .NODE_ENV ||
+          "development"
+          }`
+        );
 
-      console.log(
-        "========================================="
-      );
-    });
+        console.log(
+          "========================================="
+        );
+      }
+    );
   } catch (err) {
     console.error(
       "❌ Failed to start server:",
       {
-        message: err?.message,
-        stack: err?.stack,
+        message:
+          err?.message,
+
+        stack:
+          err?.stack,
       }
     );
 

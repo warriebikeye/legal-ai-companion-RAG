@@ -1,7 +1,7 @@
 import Conversation from "../models/Conversation.js";
 import Message from "../models/Message.js";
 
-export async function getOrCreateConversation({ conversationId, userId, country }) {
+export async function getOrCreateConversation({ conversationId, userId, country, title }) {
   if (conversationId) {
     const convo = await Conversation.findOne({ _id: conversationId, userId });
     if (convo) return convo;
@@ -10,7 +10,7 @@ export async function getOrCreateConversation({ conversationId, userId, country 
   return Conversation.create({
     userId,
     country: (country || "nigeria").toLowerCase(),
-    title: "New Chat",
+    title: title || "New Chat",
   });
 }
 
