@@ -21,6 +21,7 @@
     "@upstash/redis": "^1.35.3",
     "axios": "^1.16.1",
     "bullmq": "^5.77.7",
+    "concurrently": "^10.0.3",
     "connect-mongo": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
@@ -42,8 +43,5 @@
     "swagger-ui-express": "^5.0.1",
     "tesseract.js": "^6.0.1",
     "uuid": "^11.1.0"
-  },
-  "devDependencies": {
-    "concurrently": "^10.0.3"
   }
 }
