@@ -26,6 +26,17 @@ const UserSchema = new mongoose.Schema(
     },
 
     /* =========================================
+       Role
+    ========================================= */
+
+    role: {
+      type: String,
+      enum: ["user", "admin"],
+      default: "user",
+      index: true,
+    },
+
+    /* =========================================
        Subscription
     ========================================= */
 
@@ -86,6 +97,12 @@ const UserSchema = new mongoose.Schema(
     lastRequestDate: {
       type: Date,
       default: null,
+    },
+
+    lastActiveAt: {
+      type: Date,
+      default: null,
+      index: true,
     },
   },
   {

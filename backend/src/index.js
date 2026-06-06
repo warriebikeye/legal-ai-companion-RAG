@@ -78,6 +78,8 @@ import violationRoutes from "./routes/violation.route.js";
 
 import authRoutes from "./routes/auth.routes.js";
 
+import adminRoutes from "./routes/admin.routes.js";
+
 import conversationRoutes from "./routes/conversation.routes.js";
 
 /* =========================================================
@@ -415,6 +417,10 @@ async function startServer() {
       ingestRoutes
     );
 
+    app.use(
+      "/admin",
+       adminRoutes
+      );
     app.use(
       "/report",
       violationRoutes

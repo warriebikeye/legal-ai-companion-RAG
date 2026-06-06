@@ -10,6 +10,11 @@ import {
   getEmbeddingModel,
 } from "../services/model-router.service.js";
 
+import {
+  trackModelCall,
+  trackLatency,
+} from "../utils/metrics.js";
+
 /* =========================================================
    Logger
 ========================================================= */
@@ -160,6 +165,8 @@ export async function getEmbedding(
       result?.embedding?.values ||
       [];
 
+    const durationMs = Date.now() - started;
+
     log(
       "✅ Embedding generated successfully",
       {
@@ -168,10 +175,13 @@ export async function getEmbedding(
         vectorLength:
           embedding.length,
 
-        durationMs:
-          Date.now() - started,
+        durationMs,
       }
     );
+
+    // Track embedding model usage + latency (fire-and-forget)
+    trackModelCall(modelName);
+    trackLatency(durationMs);
 
     return embedding;
   } catch (err) {
@@ -189,10 +199,6 @@ export async function getEmbedding(
     throw err;
   }
 }
-
-/* =========================================================
-   Generate Answer
-========================================================= */
 
 /* =========================================================
    Generate Answer
@@ -270,6 +276,8 @@ ${context}
       result?.response?.text?.() ||
       "";
 
+    const durationMs = Date.now() - started;
+
     log(
       "✅ Gemini response generated",
       {
@@ -283,18 +291,20 @@ ${context}
             response
           ),
 
-        durationMs:
-          Date.now() - started,
+        durationMs,
       }
     );
+
+    // Track model usage + latency for admin dashboard (fire-and-forget)
+    trackModelCall(modelName);
+    trackLatency(durationMs);
 
     return {
       response,
 
       modelUsed: modelName,
 
-      latencyMs:
-        Date.now() - started,
+      latencyMs: durationMs,
 
       fallbackUsed: false,
     };
