@@ -123,4 +123,4 @@ export async function streamDashboard(req, res) {
     log("Admin SSE connection closed", { adminId: req.user?._id });
     res.end();
   });
-}
+} 
