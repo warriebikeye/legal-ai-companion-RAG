@@ -3,7 +3,7 @@
 import express from "express";
 import { requireAuth } from "../middleware/requireAuth.js";// reuse your existing auth check
 import { isAdmin } from "../middleware/isAdmin.middleware.js";
-import { streamDashboard } from "../controllers/adminStream.controller.js";
+import { streamDashboard } from "../controllers/Adminstream.controller.js";
 import {
   getDashboard,
   listUsers,
