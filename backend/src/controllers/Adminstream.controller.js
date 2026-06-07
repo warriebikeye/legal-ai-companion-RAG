@@ -121,6 +121,6 @@ export async function streamDashboard(req, res) {
     clearInterval(queuePoll);
     clearInterval(statsPoll);
     log("Admin SSE connection closed", { adminId: req.user?._id });
-    res.end();
+    res.end();   
   });
 } 
