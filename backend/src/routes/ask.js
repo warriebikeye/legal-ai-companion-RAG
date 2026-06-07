@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { requireAuth } from "../middleware/requireAuth.js";
-import { handleTextQuery } from '../controllers/ask.controller.js';
+import { handleTextQuery, handleTextQueryStream } from '../controllers/ask.controller.js';
 
 const upload = multer();
 const router = express.Router();
@@ -57,5 +57,5 @@ const router = express.Router();
  */
 //router.post('/text', handleTextQuery);
 router.post('/text',requireAuth, upload.array('files'), handleTextQuery);
-
+router.post("/stream", requireAuth, upload.array("files"), handleTextQueryStream);
 export default router;
