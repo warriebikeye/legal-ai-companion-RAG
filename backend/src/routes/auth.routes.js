@@ -1,8 +1,55 @@
 // src/routes/auth.routes.js
 import { Router } from "express";
-import { googleAuth, googleCallback, me, logout } from "../controllers/auth.controller.js";
+import passport from "passport";
+import {
+  googleCallback,
+  me,
+  logout,
+} from "../controllers/auth.controller.js";
 
 const router = Router();
+
+/* =========================================================
+   WEBVIEW USER-AGENT FIX
+   
+   Google blocks OAuth when it detects the Android WebView
+   token ("; wv)") in the User-Agent string.
+   
+   This middleware runs before passport.authenticate() and
+   replaces the WebView UA with a standard Chrome mobile UA
+   so Google's OAuth endpoint accepts the request.
+   
+   Also handles the Intent URL fallback query param (?intent=1)
+   sent by the frontend when it detects a WebView itself.
+========================================================= */
+
+const CHROME_MOBILE_UA =
+  "Mozilla/5.0 (Linux; Android 10; Pixel 4) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+
+function fixWebViewUA(req, res, next) {
+  const ua = req.headers["user-agent"] || "";
+
+  // Detect Android WebView — Google checks for "; wv)" token
+  const isAndroidWebView =
+    /; wv\)/.test(ua) ||
+    /wv/.test(ua) ||
+    req.query.intent === "1"; // set by frontend openAuth util
+
+  if (isAndroidWebView) {
+    console.log("[AUTH] WebView detected — spoofing UA for Google OAuth", {
+      original: ua,
+      replaced: CHROME_MOBILE_UA,
+    });
+    req.headers["user-agent"] = CHROME_MOBILE_UA;
+  }
+
+  next();
+}
+
+/* =========================================================
+   ROUTES
+========================================================= */
 
 /**
  * @swagger
@@ -17,12 +64,29 @@ const router = Router();
  *   get:
  *     summary: Start Google OAuth login
  *     tags: [Auth]
- *     description: Redirects the user to Google for authentication. On success, Google redirects back to /auth/google/callback.
+ *     description: >
+ *       Redirects the user to Google for authentication.
+ *       Includes WebView User-Agent fix for apps wrapped in
+ *       Android WebView (AllAppPress etc).
+ *       On success, Google redirects back to /auth/google/callback.
+ *     parameters:
+ *       - in: query
+ *         name: intent
+ *         schema:
+ *           type: string
+ *           enum: ["1"]
+ *         description: Set by frontend when Android WebView is detected
  *     responses:
  *       302:
  *         description: Redirect to Google OAuth consent screen
  */
-router.get("/google", googleAuth);
+router.get(
+  "/google",
+  fixWebViewUA,                                   // ← runs first, fixes UA
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+  })
+);
 
 /**
  * @swagger
@@ -30,7 +94,7 @@ router.get("/google", googleAuth);
  *   get:
  *     summary: Google OAuth callback
  *     tags: [Auth]
- *     description: Google redirects here after authentication. Creates a session and redirects to /dashboard (or your configured page).
+ *     description: Google redirects here after authentication.
  *     responses:
  *       302:
  *         description: Redirect after login success or failure
@@ -43,7 +107,6 @@ router.get("/google/callback", googleCallback);
  *   get:
  *     summary: Get current authenticated user
  *     tags: [Auth]
- *     description: Returns the current session authentication status and user object (if logged in).
  *     responses:
  *       200:
  *         description: Current auth state
@@ -52,15 +115,12 @@ router.get("/google/callback", googleCallback);
  *             schema:
  *               type: object
  *               properties:
- *                 authenticated:
+ *                 isAuthenticated:
  *                   type: boolean
- *                   example: true
- *                 user:
- *                   type: object
- *                   nullable: true
- *                   description: Passport user object stored in session
- *       401:
- *         description: Not authenticated (only if you later choose to protect this route)
+ *                 userEmail:
+ *                   type: string
+ *                 subscriptionTier:
+ *                   type: string
  */
 router.get("/me", me);
 
@@ -70,18 +130,9 @@ router.get("/me", me);
  *   post:
  *     summary: Logout current user
  *     tags: [Auth]
- *     description: Destroys the current session and clears the session cookie.
  *     responses:
  *       200:
  *         description: Logout success
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
  */
 router.post("/logout", logout);
 
