@@ -1,7 +1,10 @@
 import nodemailer from "nodemailer";
 
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
+  family: 4,             // force IPv4
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
@@ -10,7 +13,7 @@ const transporter = nodemailer.createTransport({
 
 export async function sendVerificationEmail(toEmail, token) {
   await transporter.sendMail({
-    from: `"DeeBees Legal" <${process.env.EMAIL_USER}>`,
+    from: `"CLAUZIFY VERIFICATION" <${process.env.EMAIL_USER}>`,
     to: toEmail,
     subject: "Your verification code",
     html: `
