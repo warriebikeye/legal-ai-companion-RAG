@@ -9,9 +9,9 @@ import {
 
 const router = Router();
 
-router.post("/auth/register",      register);
-router.post("/auth/verify-email",  verifyEmail);
-router.post("/auth/login",         login);
+router.post("/register",      register);
+router.post("/verify-email",  verifyEmail);
+router.post("/login",         login);
 
 /* =========================================================
    WEBVIEW USER-AGENT FIX
