@@ -4,6 +4,7 @@ import express from "express";
 import { requireAuth } from "../middleware/requireAuth.js";// reuse your existing auth check
 import { isAdmin } from "../middleware/isAdmin.middleware.js";
 import { streamDashboard } from "../controllers/Adminstream.controller.js";
+import { requireAdmin } from "../middleware/requireAdmin.js";
 import {
   getDashboard,
   listUsers,
@@ -49,7 +50,7 @@ const router = express.Router();
  *       403:
  *         description: Forbidden — admin only
  */
-router.get("/stats",requireAuth, getDashboard);
+router.get("/stats",requireAuth, requireAdmin, getDashboard);
 
 /* =========================================================
    USERS
@@ -84,7 +85,7 @@ router.get("/stats",requireAuth, getDashboard);
  *       200:
  *         description: Paginated users array
  */
-router.get("/users",requireAuth, listUsers);
+router.get("/users",requireAuth, requireAdmin, listUsers);
 
 /* =========================================================
    QUEUE
@@ -102,7 +103,7 @@ router.get("/users",requireAuth, listUsers);
  *       200:
  *         description: Queue counts + recent failed jobs
  */
-router.get("/queue",requireAuth, getQueueStatus);
+router.get("/queue",requireAuth, requireAdmin, getQueueStatus);
 
 /**
  * @swagger
@@ -124,6 +125,6 @@ router.get("/queue",requireAuth, getQueueStatus);
  *       404:
  *         description: Job not found
  */
-router.post("/queue/retry/:jobId",requireAuth, retryJob);
+router.post("/queue/retry/:jobId",requireAuth, requireAdmin, retryJob);
 router.get("/stream", streamDashboard);
 export default router;

@@ -4,27 +4,28 @@ import passport from "passport";
 import {
   googleCallback,
   me,
-  logout, register, verifyEmail, login ,
+  logout,
+  register,
+  verifyEmail,
+  login,
 } from "../controllers/auth.controller.js";
+import {
+  authRateLimiter,
+  meLimiter,
+} from "../middleware/rateLimiter.js";
 
 const router = Router();
 
-router.post("/register",      register);
-router.post("/verify-email",  verifyEmail);
-router.post("/login",         login);
+/* =========================================================
+   EMAIL / PASSWORD AUTH
+========================================================= */
+
+router.post("/register",     authRateLimiter, register);
+router.post("/verify-email", authRateLimiter, verifyEmail);
+router.post("/login",        authRateLimiter, login);
 
 /* =========================================================
    WEBVIEW USER-AGENT FIX
-   
-   Google blocks OAuth when it detects the Android WebView
-   token ("; wv)") in the User-Agent string.
-   
-   This middleware runs before passport.authenticate() and
-   replaces the WebView UA with a standard Chrome mobile UA
-   so Google's OAuth endpoint accepts the request.
-   
-   Also handles the Intent URL fallback query param (?intent=1)
-   sent by the frontend when it detects a WebView itself.
 ========================================================= */
 
 const CHROME_MOBILE_UA =
@@ -34,11 +35,10 @@ const CHROME_MOBILE_UA =
 function fixWebViewUA(req, res, next) {
   const ua = req.headers["user-agent"] || "";
 
-  // Detect Android WebView — Google checks for "; wv)" token
   const isAndroidWebView =
     /; wv\)/.test(ua) ||
     /wv/.test(ua) ||
-    req.query.intent === "1"; // set by frontend openAuth util
+    req.query.intent === "1";
 
   if (isAndroidWebView) {
     console.log("[AUTH] WebView detected — spoofing UA for Google OAuth", {
@@ -52,14 +52,14 @@ function fixWebViewUA(req, res, next) {
 }
 
 /* =========================================================
-   ROUTES
+   GOOGLE OAUTH
 ========================================================= */
 
 /**
  * @swagger
  * tags:
  *   name: Auth
- *   description: Authentication endpoints (Google OAuth + session)
+ *   description: Authentication endpoints (Email/Password + Google OAuth)
  */
 
 /**
@@ -71,8 +71,8 @@ function fixWebViewUA(req, res, next) {
  *     description: >
  *       Redirects the user to Google for authentication.
  *       Includes WebView User-Agent fix for apps wrapped in
- *       Android WebView (AllAppPress etc).
- *       On success, Google redirects back to /auth/google/callback.
+ *       Android WebView. On success, Google redirects back
+ *       to /auth/google/callback.
  *     parameters:
  *       - in: query
  *         name: intent
@@ -86,7 +86,7 @@ function fixWebViewUA(req, res, next) {
  */
 router.get(
   "/google",
-  fixWebViewUA,                                   // ← runs first, fixes UA
+  fixWebViewUA,
   passport.authenticate("google", {
     scope: ["profile", "email"],
   })
@@ -104,6 +104,10 @@ router.get(
  *         description: Redirect after login success or failure
  */
 router.get("/google/callback", googleCallback);
+
+/* =========================================================
+   SESSION
+========================================================= */
 
 /**
  * @swagger
@@ -126,7 +130,7 @@ router.get("/google/callback", googleCallback);
  *                 subscriptionTier:
  *                   type: string
  */
-router.get("/me", me);
+router.get("/me", meLimiter, me);
 
 /**
  * @swagger
