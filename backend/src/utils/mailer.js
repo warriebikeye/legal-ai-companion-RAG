@@ -1,19 +1,19 @@
 import nodemailer from "nodemailer";
 
 const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,   // false for port 587 (STARTTLS)
-  family: 4,
+  service: "gmail",
   auth: {
+    type: "OAuth2",
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+    clientId: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    refreshToken: process.env.GMAIL_REFRESH_TOKEN,
   },
 });
 
 export async function sendVerificationEmail(toEmail, token) {
   await transporter.sendMail({
-    from: `"CLAUZIFY VERIFICATION" <${process.env.EMAIL_USER}>`,
+    from: `"CLAUZIFY" <${process.env.EMAIL_USER}>`,
     to: toEmail,
     subject: "Your verification code",
     html: `
