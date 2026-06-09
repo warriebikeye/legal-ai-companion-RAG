@@ -14,7 +14,11 @@ const UserSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-
+    // Add to your existing User schema
+    password: { type: String },           // hashed, optional (Google users won't have it)
+    isVerified: { type: Boolean, default: false },
+    verifyToken: { type: String },
+    verifyTokenExpiry: { type: Date },
     name: {
       type: String,
       default: "",

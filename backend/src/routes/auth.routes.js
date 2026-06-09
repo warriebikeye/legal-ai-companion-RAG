@@ -4,10 +4,14 @@ import passport from "passport";
 import {
   googleCallback,
   me,
-  logout,
+  logout, register, verifyEmail, login ,
 } from "../controllers/auth.controller.js";
 
 const router = Router();
+
+router.post("/auth/register",      register);
+router.post("/auth/verify-email",  verifyEmail);
+router.post("/auth/login",         login);
 
 /* =========================================================
    WEBVIEW USER-AGENT FIX
