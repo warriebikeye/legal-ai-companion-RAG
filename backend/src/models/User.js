@@ -4,7 +4,7 @@ const UserSchema = new mongoose.Schema(
   {
     googleId: {
       type: String,
-      required: true,
+      required: false,
       unique: true,
       index: true,
     },
