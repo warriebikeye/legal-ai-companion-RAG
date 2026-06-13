@@ -2,7 +2,10 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { AI_MODELS } from "../config/ai.config.js";
-import { getEmbeddingModel } from "../services/model-router.service.js";
+import {
+  getEmbeddingModel,
+  getModelForTask,
+} from "../services/model-router.service.js";
 import { trackModelCall, trackLatency } from "../utils/metrics.js";
 
 /* =========================================================
@@ -49,6 +52,18 @@ function estimateTokens(text = "") {
 }
 
 /* =========================================================
+   Resolve model name
+
+   Single source of truth — always goes through getModelForTask()
+   unless an explicit modelName override is passed by the caller.
+========================================================= */
+
+function resolveModel({ modelName, userTier, task, hasLargeContext }) {
+  if (modelName) return modelName;
+  return getModelForTask({ userTier, task, hasLargeContext });
+}
+
+/* =========================================================
    Generate Embedding
 ========================================================= */
 
@@ -75,7 +90,6 @@ export async function getEmbedding(text) {
       durationMs,
     });
 
-    // Fire-and-forget metrics
     trackModelCall(modelName);
     trackLatency(durationMs);
 
@@ -88,22 +102,34 @@ export async function getEmbedding(text) {
 
 /* =========================================================
    Generate Answer — non-streaming (internal / cache path)
+
+   modelName  — explicit override; omit to let getModelForTask() decide
+   userTier   — "free" | "premium" | "enterprise"
+   task       — AI_TASKS value (e.g. "document_analysis", "legal_reasoning")
+   hasLargeContext — true triggers PRO upgrade for non-free tiers
 ========================================================= */
 
 export async function getAnswer({
   query,
   context,
   systemPrompt,
-  modelName = AI_MODELS.FLASH,
+  userTier = "free",
+  task = "document_analysis",
+  hasLargeContext = false,
+  modelName,                       // explicit override (optional)
   fallbackModel = AI_MODELS.FLASH,
 }) {
+  const resolvedModel = resolveModel({ modelName, userTier, task, hasLargeContext });
   const started = Date.now();
 
   try {
-    const model = getModel(modelName);
+    const model = getModel(resolvedModel);
 
     log("Gemini answer generation started", {
-      modelName,
+      resolvedModel,
+      userTier,
+      task,
+      hasLargeContext,
       queryLength: query?.length || 0,
       contextLength: context?.length || 0,
       estimatedInputTokens: estimateTokens(`${systemPrompt}\n${query}\n${context}`),
@@ -111,34 +137,35 @@ export async function getAnswer({
     });
 
     const prompt = `${systemPrompt}\n\nUSER QUERY:\n${query}\n\nCONTEXT:\n${context}`;
-
     const result = await model.generateContent(prompt);
     const response = result?.response?.text?.() || "";
     const durationMs = Date.now() - started;
 
     log("✅ Gemini response generated", {
-      modelName,
+      resolvedModel,
       responseLength: response.length,
       estimatedOutputTokens: estimateTokens(response),
       durationMs,
     });
 
-    trackModelCall(modelName);
+    trackModelCall(resolvedModel);
     trackLatency(durationMs);
 
-    return { response, modelUsed: modelName, latencyMs: durationMs, fallbackUsed: false };
+    return { response, modelUsed: resolvedModel, latencyMs: durationMs, fallbackUsed: false };
   } catch (err) {
     console.error("❌ Gemini answer error", {
-      modelName,
+      resolvedModel,
       message: err?.message,
       queryPreview: query?.slice(0, 120),
     });
 
-    if (modelName !== fallbackModel) {
-      log("Primary model failed → trying fallback", { failedModel: modelName, fallbackModel });
+    if (resolvedModel !== fallbackModel) {
+      log("Primary model failed → trying fallback", { failedModel: resolvedModel, fallbackModel });
       try {
         const fallbackResponse = await getAnswer({
-          query, context, systemPrompt,
+          query,
+          context,
+          systemPrompt,
           modelName: fallbackModel,
           fallbackModel,
         });
@@ -156,11 +183,18 @@ export async function getAnswer({
 
 /* =========================================================
    Generate Answer — STREAMING
+
+   modelName  — explicit override; omit to let getModelForTask() decide
+   userTier   — "free" | "premium" | "enterprise"
+   task       — AI_TASKS value
+   hasLargeContext — true triggers PRO upgrade for non-free tiers
+
    Yields text chunks as they arrive from Gemini.
-   The caller is responsible for writing chunks to the SSE stream.
+   On primary-model failure mid-stream, falls back to the
+   non-streaming path and yields the full response as one chunk.
 
    Usage:
-     const stream = getAnswerStream({ query, context, systemPrompt, modelName });
+     const stream = getAnswerStream({ query, context, systemPrompt, userTier, task });
      for await (const chunk of stream) {
        res.write(`data: ${JSON.stringify({ type: "chunk", text: chunk })}\n\n`);
      }
@@ -170,23 +204,28 @@ export async function* getAnswerStream({
   query,
   context,
   systemPrompt,
-  modelName = AI_MODELS.FLASH,
+  userTier = "free",
+  task = "document_analysis",
+  hasLargeContext = false,
+  modelName,                       // explicit override (optional)
   fallbackModel = AI_MODELS.FLASH,
 }) {
+  const resolvedModel = resolveModel({ modelName, userTier, task, hasLargeContext });
   const started = Date.now();
 
   log("Gemini stream started", {
-    modelName,
+    resolvedModel,
+    userTier,
+    task,
+    hasLargeContext,
     queryLength: query?.length || 0,
     estimatedInputTokens: estimateTokens(`${systemPrompt}\n${query}\n${context}`),
   });
 
   const prompt = `${systemPrompt}\n\nUSER QUERY:\n${query}\n\nCONTEXT:\n${context}`;
 
-  let usedModel = modelName;
-
   try {
-    const model = getModel(modelName);
+    const model = getModel(resolvedModel);
     const result = await model.generateContentStream(prompt);
 
     for await (const chunk of result.stream) {
@@ -195,29 +234,31 @@ export async function* getAnswerStream({
     }
 
     const durationMs = Date.now() - started;
-    log("✅ Gemini stream complete", { modelName, durationMs });
+    log("✅ Gemini stream complete", { resolvedModel, durationMs });
 
-    trackModelCall(usedModel);
+    trackModelCall(resolvedModel);
     trackLatency(durationMs);
-
   } catch (err) {
-    console.error("❌ Gemini stream error", { modelName, message: err?.message });
+    console.error("❌ Gemini stream error", { resolvedModel, message: err?.message });
 
-    // Fallback: if primary model fails mid-stream, try fallback (non-streaming)
-    // to at least get an answer out rather than a silent failure
-    if (modelName !== fallbackModel) {
-      log("Stream failed → fallback to non-streaming", { failedModel: modelName, fallbackModel });
+    // Fallback: primary stream failed — degrade gracefully to non-streaming
+    if (resolvedModel !== fallbackModel) {
+      log("Stream failed → fallback to non-streaming", {
+        failedModel: resolvedModel,
+        fallbackModel,
+      });
       try {
         const fallback = await getAnswer({
-          query, context, systemPrompt,
+          query,
+          context,
+          systemPrompt,
           modelName: fallbackModel,
           fallbackModel,
         });
-        usedModel = fallbackModel;
-        // Yield the fallback response as one big chunk
-        yield fallback.response;
+        log("✅ Fallback model succeeded", { fallbackModel });
         trackModelCall(fallbackModel);
         trackLatency(Date.now() - started);
+        yield fallback.response;
         return;
       } catch (fallbackErr) {
         console.error("❌ Fallback also failed", { message: fallbackErr?.message });

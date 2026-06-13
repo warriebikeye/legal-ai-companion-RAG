@@ -1,4 +1,4 @@
-// src/utils/setAuthCookie.js
+//backend src/utils/setAuthCookie.js
 import jwt from "jsonwebtoken";
 
 const SECURE_COOKIE_NAME = "ub_sess"; // HttpOnly — session security

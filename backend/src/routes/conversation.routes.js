@@ -64,7 +64,7 @@ const router = express.Router();
  *       500:
  *         description: Server error
  */
-router.get("/conversations", requireAuth, listConversations);
+router.get("/", requireAuth, listConversations);
 
 /**
  * @swagger
@@ -139,7 +139,7 @@ router.get("/conversations", requireAuth, listConversations);
  *         description: Server error
  */
 router.get(
-  "/conversations/:conversationId/messages",
+  "/:conversationId/messages",
   requireAuth,
   getConversationMessages
 );

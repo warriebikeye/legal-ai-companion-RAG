@@ -36,8 +36,7 @@ export function normalizeTier(tier) {
     return USER_TIERS.FREE;
   }
 
-  const normalized =
-    String(tier).toLowerCase();
+  const normalized = String(tier).toLowerCase();
 
   if (
     normalized !== USER_TIERS.FREE &&
@@ -51,7 +50,15 @@ export function normalizeTier(tier) {
 }
 
 /* =========================================================
-   Get AI Model
+   Embedding Model
+========================================================= */
+
+export function getEmbeddingModel() {
+  return AI_MODELS.EMBEDDING;
+}
+
+/* =========================================================
+   Model Selection
 ========================================================= */
 
 export function getModelForTask({
@@ -73,30 +80,56 @@ export function getModelForTask({
       normalizedTier
     ]?.[task];
 
-  /* =====================================================
+  /* =========================================
+     Cheap tasks always use Flash
+  ========================================= */
+
+  if (
+    task === AI_TASKS.SUMMARIZATION ||
+    task === AI_TASKS.CLASSIFICATION
+  ) {
+    selectedModel = AI_MODELS.FLASH;
+
+    log(
+      "Cheap task detected → forcing FLASH"
+    );
+  }
+
+  /* =========================================
      Large context upgrade rule
-  ===================================================== */
+  ========================================= */
 
   if (
     hasLargeContext &&
-    normalizedTier !==
-      USER_TIERS.FREE
+    normalizedTier !== USER_TIERS.FREE
   ) {
-    selectedModel =
-      AI_MODELS.PRO;
+    selectedModel = AI_MODELS.PRO;
 
     log(
       "Large context detected → upgraded to PRO"
     );
   }
 
-  /* =====================================================
+  /* =========================================
+     Enterprise always PRO
+  ========================================= */
+
+  if (
+    normalizedTier === USER_TIERS.ENTERPRISE
+  ) {
+    selectedModel = AI_MODELS.PRO;
+
+    log(
+      "Enterprise tier → forcing PRO"
+    );
+  }
+
+  /* =========================================
      Fallback protection
-  ===================================================== */
+  ========================================= */
 
   if (!selectedModel) {
-    selectedModel =
-      AI_MODELS.FLASH;
+    selectedModel = AI_MODELS.FLASH;
 
     log(
       "Fallback model applied",
@@ -114,7 +147,7 @@ export function getModelForTask({
 }
 
 /* =========================================================
-   Get Context Limits
+   Context Limits
 ========================================================= */
 
 export function getContextLimits(
@@ -138,7 +171,7 @@ export function getContextLimits(
 }
 
 /* =========================================================
-   Determine Task Type
+   Task Detection
 ========================================================= */
 
 export function determineTaskType({
@@ -151,6 +184,10 @@ export function determineTaskType({
   const hasLargeDocument =
     extraContext.length > 3000;
 
+  /* =========================================
+     Large uploaded documents
+  ========================================= */
+
   if (hasLargeDocument) {
     log(
       "Task classified as DOCUMENT_ANALYSIS"
@@ -158,6 +195,58 @@ export function determineTaskType({
 
     return AI_TASKS.DOCUMENT_ANALYSIS;
   }
+
+  /* =========================================
+     Summaries
+  ========================================= */
+
+  const summaryKeywords = [
+    "summarize",
+    "summary",
+    "tl;dr",
+    "briefly explain",
+    "short version",
+  ];
+
+  if (
+    summaryKeywords.some((keyword) =>
+      normalizedQuery.includes(keyword)
+    )
+  ) {
+    log(
+      "Task classified as SUMMARIZATION"
+    );
+
+    return AI_TASKS.SUMMARIZATION;
+  }
+
+  /* =========================================
+     Classification
+  ========================================= */
+
+  const classificationKeywords = [
+    "classify",
+    "categorize",
+    "label",
+    "group into",
+    "identify category",
+  ];
+
+  if (
+    classificationKeywords.some((keyword) =>
+      normalizedQuery.includes(keyword)
+    )
+  ) {
+    log(
+      "Task classified as CLASSIFICATION"
+    );
+
+    return AI_TASKS.CLASSIFICATION;
+  }
+
+  /* =========================================
+     Legal reasoning
+  ========================================= */
 
   const reasoningKeywords = [
     "analyze",
@@ -169,14 +258,17 @@ export function determineTaskType({
     "court",
     "rights",
     "defend",
+    "liable",
+    "liability",
+    "breach",
+    "contract",
+    "damages",
+    "legal opinion",
   ];
 
   const isReasoningTask =
-    reasoningKeywords.some(
-      (keyword) =>
-        normalizedQuery.includes(
-          keyword
-        )
+    reasoningKeywords.some((keyword) =>
+      normalizedQuery.includes(keyword)
     );
 
   if (isReasoningTask) {
@@ -193,9 +285,18 @@ export function determineTaskType({
 }
 
 /* =========================================================
-   Embedding Model
+   Legacy Compatibility
+   (Used by any older code that still calls selectModel())
 ========================================================= */
 
-export function getEmbeddingModel() {
-  return AI_MODELS.EMBEDDING;
+export function selectModel({
+  userTier = USER_TIERS.FREE,
+  taskType = AI_TASKS.CHAT,
+  contextLength = 0,
+}) {
+  return getModelForTask({
+    userTier,
+    task: taskType,
+    hasLargeContext: contextLength > 12000,
+  });
 }
