@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import pdf from "../utils/pdfParseWrapper.cjs";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { qdrant } from "../vectorstore/qdrant.js";
+import { ocrPdfBuffer, needsOcrFallback } from "../utils/ocrFallback.js"; // ✅ NEW
 
 dotenv.config();
 
@@ -21,15 +22,25 @@ function cleanText(text) {
 }
 
 /**
- * ✅ CHANGED: Simpler + Node-safe PDF extraction using pdf-parse
- * Instead of rendering pages like pdfjs, we extract raw text once
- * and split into logical chunks.
+ * Extract text chunks from a PDF buffer.
+ * Falls back to Tesseract OCR when pdf-parse yields no usable text
+ * (i.e. the PDF is image-based / scanned).
  */
 async function extractPdfChunks(fileBuffer) {
   const data = await pdf(fileBuffer);
+  let fullText = cleanText(data.text || "");
 
-  // pdf-parse already merges all page text safely
-  const fullText = cleanText(data.text);
+  // ✅ NEW: OCR fallback for image-based PDFs
+  if (needsOcrFallback(fullText)) {
+    console.warn("⚠️  pdf-parse returned empty text — attempting OCR fallback");
+    try {
+      const ocrText = await ocrPdfBuffer(fileBuffer);
+      fullText = cleanText(ocrText);
+      console.log(`✅ OCR recovered ${fullText.length} chars`);
+    } catch (ocrErr) {
+      console.error(`❌ OCR fallback failed: ${ocrErr.message}`); // ← this will tell you exactly why
+    }
+  }
 
   // Split into semantic chunks (better for embeddings than per-page)
   const chunkSize = 1200; // ideal for Gemini embeddings
@@ -95,7 +106,7 @@ export async function ingestFile(file, country) {
     let rawChunks = [];
 
     if (file.mimetype === "application/pdf") {
-      rawChunks = await extractPdfChunks(fileBuffer); // ✅ now uses pdf-parse pipeline
+      rawChunks = await extractPdfChunks(fileBuffer); // ✅ OCR fallback is now inside here
     } else if (file.mimetype.startsWith("text/")) {
       rawChunks = [{ text: fileBuffer.toString("utf8"), page: 1 }];
     } else {

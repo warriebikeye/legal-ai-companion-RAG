@@ -2,23 +2,38 @@ import Tesseract from "tesseract.js";
 import fs from "fs/promises";
 import path from "path";
 import pdf from "../utils/pdfParseWrapper.cjs";
+import { ocrPdfBuffer, needsOcrFallback } from "../utils/ocrFallback.js"; // ✅ NEW
 
 /**
- * Extract text from PDF using Node-safe parser
+ * Extract text from PDF using Node-safe parser.
+ * Falls back to Tesseract OCR if the PDF is image-based (scanned).
  * @param {Buffer} buffer
  * @returns {Promise<string>}
  */
 async function extractPdfText(buffer) {
   const data = await pdf(buffer);
 
-  return (data.text || "")
+  const text = (data.text || "")
     .replace(/\s+/g, " ")
     .replace(/[\x00-\x1F\x7F]/g, "")
     .trim();
+
+  // ✅ NEW: if pdf-parse returned near-nothing, the PDF is likely image-based
+  if (needsOcrFallback(text)) {
+    console.warn("⚠️  pdf-parse returned empty text — attempting OCR fallback");
+    try {
+      const ocrText = await ocrPdfBuffer(buffer);
+      return ocrText.replace(/\s+/g, " ").replace(/[\x00-\x1F\x7F]/g, "").trim();
+    } catch (ocrErr) {
+      console.error(`❌ OCR fallback failed: ${ocrErr.message}`);
+      return ""; // graceful degradation
+    }
+  }
+  return text;
 }
 
 export class ExtractionService {
-  // ✅ CHANGED: simplified — no rendering, just raw extraction
+  // ✅ UNCHANGED in signature — OCR fallback is transparent to callers
   async extractFromPDF(buffer) {
     return await extractPdfText(buffer);
   }
