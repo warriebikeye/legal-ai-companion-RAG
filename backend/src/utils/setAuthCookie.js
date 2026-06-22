@@ -2,10 +2,10 @@
 import jwt from "jsonwebtoken";
 
 const SECURE_COOKIE_NAME = "ub_sess"; // HttpOnly — session security
-const UI_COOKIE_NAME     = "ub_ui";   // JS-readable — UI state only
+const UI_COOKIE_NAME = "ub_ui";   // JS-readable — UI state only
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-const THIRTY_DAYS_S  = 30 * 24 * 60 * 60;
+const THIRTY_DAYS_S = 30 * 24 * 60 * 60;
 
 /**
  * Two-cookie strategy:
@@ -31,11 +31,11 @@ export function setAuthCookie(res, user) {
   const isProd = process.env.NODE_ENV === "production";
 
   const payload = {
-    id:                 user._id?.toString() ?? user.id?.toString(),
-    name:               user.name               ?? "",
-    email:              user.email              ?? "",
-    photo:              user.photo              ?? "",
-    subscriptionTier:   user.subscriptionTier   ?? "free",
+    id: user._id?.toString() ?? user.id?.toString(),
+    name: user.name ?? "",
+    email: user.email ?? "",
+    photo: user.photo ?? "",
+    subscriptionTier: user.subscriptionTier ?? "free",
     subscriptionStatus: user.subscriptionStatus ?? "inactive",
   };
 
@@ -45,10 +45,10 @@ export function setAuthCookie(res, user) {
   });
 
   const sharedOptions = {
-    secure:   isProd,
-    sameSite: "strict",
-    maxAge:   THIRTY_DAYS_MS,
-    path:     "/",
+    secure: isProd,
+    sameSite: isProd ? "none" : "strict", // ✅ "none" required for cross-domain in production
+    maxAge: THIRTY_DAYS_MS,
+    path: "/",
   };
 
   // 🔒 Cookie 1 — HttpOnly, XSS-proof
@@ -72,7 +72,7 @@ export function clearAuthCookie(res) {
   const base = { secure: isProd, sameSite: "strict", path: "/" };
 
   res.clearCookie(SECURE_COOKIE_NAME, { ...base, httpOnly: true });
-  res.clearCookie(UI_COOKIE_NAME,     { ...base, httpOnly: false });
+  res.clearCookie(UI_COOKIE_NAME, { ...base, httpOnly: false });
 }
 
 /**
@@ -81,7 +81,7 @@ export function clearAuthCookie(res) {
  */
 export function verifyAuthCookie(req, res, next) {
   const secret = process.env.AUTH_COOKIE_SECRET;
-  const token  = req.cookies?.[SECURE_COOKIE_NAME];
+  const token = req.cookies?.[SECURE_COOKIE_NAME];
 
   if (!secret || !token) {
     req.authCookie = null;
