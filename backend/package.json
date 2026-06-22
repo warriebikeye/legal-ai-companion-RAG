@@ -37,6 +37,7 @@
     "mammoth": "^1.10.0",
     "mongoose": "^9.1.4",
     "multer": "^2.0.2",
+    "node-cron": "^4.5.0",
     "node-poppler": "^9.1.2",
     "nodemailer": "^8.0.10",
     "openai": "^5.12.0",
