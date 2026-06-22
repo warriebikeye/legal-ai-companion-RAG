@@ -133,19 +133,6 @@ async function startServer() {
     console.log("✅ Body and cookie parsers configured");
 
     /* =====================================================
-       ENCRYPTION MIDDLEWARE
-       decryptRequest  — unwraps encrypted request bodies
-       encryptResponse — wraps JSON responses in AES-GCM
-       Both are no-ops when ENCRYPTION_SECRET is not set,
-       so safe to deploy before the env var is configured.
-       Must sit AFTER body parsers (req.body must exist)
-       and BEFORE routes (res.json must be wrapped first).
-    ===================================================== */
-    app.use(decryptRequest);
-    app.use(encryptResponse);
-    console.log("✅ Encryption middleware configured");
-
-    /* =====================================================
        GLOBAL RATE LIMITING
     ===================================================== */
     app.use(apiRateLimiter);
@@ -184,6 +171,29 @@ async function startServer() {
     console.log("✅ Passport middleware initialized");
 
     /* =====================================================
+       AUTH ROUTES
+       Mounted BEFORE the encryption middleware below —
+       the frontend talks to /auth/* with plain fetch()
+       (no encryptedFetch), so these responses must stay
+       unencrypted JSON.
+    ===================================================== */
+    app.use("/auth", authRoutes);
+    console.log("✅ Auth routes registered (unencrypted)");
+
+    /* =====================================================
+       ENCRYPTION MIDDLEWARE
+       decryptRequest  — unwraps encrypted request bodies
+       encryptResponse — wraps JSON responses in AES-GCM
+       Both are no-ops when ENCRYPTION_SECRET is not set,
+       so safe to deploy before the env var is configured.
+       Mounted AFTER /auth — the frontend's auth calls use
+       plain fetch() and must get back plain JSON.
+    ===================================================== */
+    app.use(decryptRequest);
+    app.use(encryptResponse);
+    console.log("✅ Encryption middleware configured");
+
+    /* =====================================================
        HEALTH CHECK
     ===================================================== */
     app.get("/health", async (req, res) => {
@@ -216,7 +226,6 @@ async function startServer() {
     ===================================================== */
     console.log("🛣️ Registering routes...");
 
-    app.use("/auth",          authRoutes);
     app.use("/ask",           askRoutes);
     app.use("/ask",           voiceRoutes);
     app.use("/ask",           ingestRoutes);

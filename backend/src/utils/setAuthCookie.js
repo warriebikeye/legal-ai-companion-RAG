@@ -46,7 +46,7 @@ export function setAuthCookie(res, user) {
 
   const sharedOptions = {
     secure: isProd,
-    sameSite: "none", // ✅ "none" required for cross-domain in production
+    sameSite: isProd ? "none" : "lax", // SameSite=None requires Secure — only valid when isProd sets secure:true
     maxAge: THIRTY_DAYS_MS,
     path: "/",
   };
@@ -69,7 +69,7 @@ export function setAuthCookie(res, user) {
  */
 export function clearAuthCookie(res) {
   const isProd = process.env.NODE_ENV === "production";
-  const base = { secure: isProd, sameSite: "strict", path: "/" };
+  const base = { secure: isProd, sameSite: isProd ? "none" : "lax", path: "/" };
 
   res.clearCookie(SECURE_COOKIE_NAME, { ...base, httpOnly: true });
   res.clearCookie(UI_COOKIE_NAME, { ...base, httpOnly: false });
