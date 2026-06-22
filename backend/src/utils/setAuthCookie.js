@@ -46,7 +46,7 @@ export function setAuthCookie(res, user) {
 
   const sharedOptions = {
     secure: isProd,
-    sameSite: isProd ? "none" : "strict", // ✅ "none" required for cross-domain in production
+    sameSite: "none", // ✅ "none" required for cross-domain in production
     maxAge: THIRTY_DAYS_MS,
     path: "/",
   };
