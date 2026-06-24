@@ -139,7 +139,10 @@ async function buildRAGContext(query, country, extraContext = "", options = {}) 
   const legalContext = legalChunks
     .map((r) => {
       const src = r.payload?.source ? `[Source: ${r.payload.source}]` : "";
-      const text = r.payload.text.slice(0, contextLimits.maxContextChunkLength);
+      // Use full chunk text — truncating here causes mid-sentence quote cutoffs
+      // (e.g. a numbered list item like "(4) a father" gets cut before completion).
+      // Context window is managed upstream via topK and hasLargeContext routing.
+      const text = r.payload.text;
       return `${src}\n${text}`;
     })
     .join("\n\n---\n\n");
@@ -178,7 +181,7 @@ Rules:
 - Be precise, clear, and accessible to a layperson.
 - When citing a source, use the filename from the [Source: filename] tag but ALWAYS remove the file extension — never include ".pdf", ".docx", or any extension in your response.
 - Format citations as: **Source:** \`Section X of [source name without extension] states: "..."\`
-- Always complete the full sentence of any quote. Never end a quote mid-sentence or with "...". If a quote is long, include the entire relevant sentence.
+- Always complete the full sentence of any quote. Never cut off mid-sentence, never end with "...", and never stop at a numbered list item like "(4) a father" — always finish the full clause or sentence even if it is long.
 - Present quoted contexts as bullet lists.
 - If conversation history is provided, treat the latest message as a follow-up.
 - End every response with: "_Disclaimer: This is not legal advice. Please consult a qualified lawyer._"`;
