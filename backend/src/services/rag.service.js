@@ -42,6 +42,25 @@ function isSmallTalk(text = "") {
   );
 }
 
+/* =========================================================
+   SANITIZE — strips .pdf extensions and fixes mojibake
+   encoding artifacts (â€™ → ', â€œ/â€ → ", â → ')
+   that appear when UTF-8 filenames are misread as Latin-1.
+   Applied to: source filenames, answer text, streamed chunks.
+========================================================= */
+function sanitizeText(text = "") {
+  return text
+    .replace(/\.pdf\b/gi, "")       // strip .pdf extension
+    .replace(/â€™/g, "'")           // curly apostrophe
+    .replace(/â€œ/g, "\u201C")      // left double quote
+    .replace(/â€\u009D/g, "\u201D") // right double quote
+    .replace(/â€/g, "\u201D")       // right double quote (fallback)
+    .replace(/â€"/g, "\u2013")      // en-dash
+    .replace(/â€"/g, "\u2014")      // em-dash
+    .replace(/âS/g, "'S")           // CHILD'S pattern
+    .replace(/â/g, "'");            // catch-all remaining â artifacts
+}
+
 function buildPrompt({ systemPrompt, historyText, documentContext, legalContext, extraContext, query }) {
   return [
     systemPrompt,
@@ -91,11 +110,11 @@ async function buildRAGContext(query, country, extraContext = "", options = {}) 
   const [documentResult, legalResults] = await Promise.all([
     conversationId
       ? retrieveDocumentContext({
-        queryEmbedding: embedding,
-        conversationId,
-        mode: retrievalMode,
-        topK: contextLimits.topKResults,
-      })
+          queryEmbedding: embedding,
+          conversationId,
+          mode: retrievalMode,
+          topK: contextLimits.topKResults,
+        })
       : Promise.resolve({ chunks: [], mode: "none" }),
 
     qdrant.search(`legal_chunks_${country.toLowerCase()}-gm`, {
@@ -125,7 +144,17 @@ async function buildRAGContext(query, country, extraContext = "", options = {}) 
     })
     .join("\n\n---\n\n");
 
-  const sources = [...new Set(legalChunks.map((r) => r.payload?.source).filter(Boolean))];
+  // ── Sanitize source filenames at origin ──────────────────
+  // Fixes mojibake + strips .pdf before filenames ever reach
+  // the system prompt or the frontend sources array.
+  const sources = [
+    ...new Set(
+      legalChunks
+        .map((r) => r.payload?.source)
+        .filter(Boolean)
+        .map((s) => sanitizeText(s))
+    ),
+  ];
 
   // ── Resolve model so we can flag hasLargeContext ──────────
   const promptForSizing = buildPrompt({
@@ -230,7 +259,7 @@ export async function getRAGAnswer(query, country, extraContext = "", options = 
     log("Gemini done", { modelUsed, latencyMs });
 
     const finalResponse = {
-      answer: response.replace(/\.pdf\b/gi, ""),
+      answer: sanitizeText(response), // strip .pdf + fix mojibake in answer body
       sources,
       documentMode,
       conversationId,
@@ -309,7 +338,7 @@ export async function* getRAGAnswerStream(query, country, extraContext = "", opt
     });
 
     for await (const chunk of stream) {
-      yield { type: "chunk", payload: chunk.replace(/\.pdf\b/gi, "") };
+      yield { type: "chunk", payload: sanitizeText(chunk) }; // strip .pdf + fix mojibake per chunk
     }
 
     yield {
