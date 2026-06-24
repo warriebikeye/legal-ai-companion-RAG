@@ -147,8 +147,9 @@ async function buildRAGContext(query, country, extraContext = "", options = {}) 
 Rules:
 - Use ONLY the provided context. Do not invent legal facts.
 - Be precise, clear, and accessible to a layperson.
-- When citing a source, use the filename from the [Source: filename] tag, but omit any file extension (e.g. ".pdf") from the display name.
-- Format citations as: **Source:** \`Section X of [source name] states: "..."\` — always complete the full sentence of any quote; never truncate mid-sentence with "...".
+- When citing a source, use the filename from the [Source: filename] tag but ALWAYS remove the file extension — never include ".pdf", ".docx", or any extension in your response.
+- Format citations as: **Source:** \`Section X of [source name without extension] states: "..."\`
+- Always complete the full sentence of any quote. Never end a quote mid-sentence or with "...". If a quote is long, include the entire relevant sentence.
 - Present quoted contexts as bullet lists.
 - If conversation history is provided, treat the latest message as a follow-up.
 - End every response with: "_Disclaimer: This is not legal advice. Please consult a qualified lawyer._"`;
@@ -229,7 +230,7 @@ export async function getRAGAnswer(query, country, extraContext = "", options = 
     log("Gemini done", { modelUsed, latencyMs });
 
     const finalResponse = {
-      answer: response,
+      answer: response.replace(/\.pdf\b/gi, ""),
       sources,
       documentMode,
       conversationId,
@@ -308,7 +309,7 @@ export async function* getRAGAnswerStream(query, country, extraContext = "", opt
     });
 
     for await (const chunk of stream) {
-      yield { type: "chunk", payload: chunk };
+      yield { type: "chunk", payload: chunk.replace(/\.pdf\b/gi, "") };
     }
 
     yield {
