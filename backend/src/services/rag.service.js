@@ -91,11 +91,11 @@ async function buildRAGContext(query, country, extraContext = "", options = {}) 
   const [documentResult, legalResults] = await Promise.all([
     conversationId
       ? retrieveDocumentContext({
-          queryEmbedding: embedding,
-          conversationId,
-          mode: retrievalMode,
-          topK: contextLimits.topKResults,
-        })
+        queryEmbedding: embedding,
+        conversationId,
+        mode: retrievalMode,
+        topK: contextLimits.topKResults,
+      })
       : Promise.resolve({ chunks: [], mode: "none" }),
 
     qdrant.search(`legal_chunks_${country.toLowerCase()}-gm`, {
@@ -147,9 +147,9 @@ async function buildRAGContext(query, country, extraContext = "", options = {}) 
 Rules:
 - Use ONLY the provided context. Do not invent legal facts.
 - Be precise, clear, and accessible to a layperson.
-- When citing a source, use the filename from the [Source: filename] tag.
-- Format citations as: **Source:** \`Section X of filename states: "..."\`
-- Present quoted contexts as lists.
+- When citing a source, use the filename from the [Source: filename] tag, but omit any file extension (e.g. ".pdf") from the display name.
+- Format citations as: **Source:** \`Section X of [source name] states: "..."\` — always complete the full sentence of any quote; never truncate mid-sentence with "...".
+- Present quoted contexts as bullet lists.
 - If conversation history is provided, treat the latest message as a follow-up.
 - End every response with: "_Disclaimer: This is not legal advice. Please consult a qualified lawyer._"`;
 
