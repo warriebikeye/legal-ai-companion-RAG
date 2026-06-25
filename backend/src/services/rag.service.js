@@ -50,15 +50,46 @@ function isSmallTalk(text = "") {
 ========================================================= */
 function sanitizeText(text = "") {
   return text
-    .replace(/\.pdf\b/gi, "")       // strip .pdf extension
-    .replace(/â€™/g, "'")           // curly apostrophe
-    .replace(/â€œ/g, "\u201C")      // left double quote
-    .replace(/â€\u009D/g, "\u201D") // right double quote
-    .replace(/â€/g, "\u201D")       // right double quote (fallback)
-    .replace(/â€"/g, "\u2013")      // en-dash
-    .replace(/â€"/g, "\u2014")      // em-dash
-    .replace(/âS/g, "'S")           // CHILD'S pattern
-    .replace(/â/g, "'");            // catch-all remaining â artifacts
+    .replace(/\.pdf\b/gi, "")        // strip .pdf extension
+    .replace(/â€™/g, "'")            // curly apostrophe
+    .replace(/â€œ/g, "\u201C")       // left double quote
+    .replace(/â€\u009D/g, "\u201D")  // right double quote
+    .replace(/â€/g, "\u201D")        // right double quote (fallback)
+    .replace(/â€"/g, "\u2013")       // en-dash
+    .replace(/â€"/g, "\u2014")       // em-dash
+    .replace(/âS/g, "'S")            // CHILD'S pattern
+    .replace(/â/g, "'");             // catch-all remaining â artifacts
+}
+
+/* =========================================================
+   CHUNK QUALITY GUARD — returns true if a chunk's text is
+   clean enough to send to the LLM and cite as a source.
+
+   Rejects chunks that:
+   - Are too short to be useful (< 40 chars)
+   - End mid-sentence without terminal punctuation, suggesting
+     the chunk was cut off at an arbitrary byte boundary
+   - Contain a high density of mojibake characters (â, Ã, ï¿½)
+     indicating the raw bytes were misread as Latin-1
+   - Contain replacement characters (U+FFFD) from bad decoding
+========================================================= */
+function isCleanChunk(text = "") {
+  if (!text || text.trim().length < 40) return false;
+
+  // Reject if replacement character present (bad UTF-8 decode)
+  if (text.includes("\uFFFD")) return false;
+
+  // Count mojibake indicator characters
+  const mojibakeMatches = (text.match(/[âÃï]/g) || []).length;
+  const mojibakeDensity = mojibakeMatches / text.length;
+  if (mojibakeDensity > 0.02) return false; // >2% of chars are artifacts → reject
+
+  // Reject if text ends mid-sentence (no terminal punctuation in last 60 chars)
+  const tail = text.trimEnd().slice(-60);
+  const hasTerminalPunct = /[.!?;:"')\]>]$/.test(tail);
+  if (!hasTerminalPunct) return false;
+
+  return true;
 }
 
 function buildPrompt({ systemPrompt, historyText, documentContext, legalContext, extraContext, query }) {
@@ -135,7 +166,18 @@ async function buildRAGContext(query, country, extraContext = "", options = {}) 
     .map((c) => c.text?.slice(0, contextLimits.maxContextChunkLength))
     .join("\n\n");
 
-  const legalChunks = legalResults.filter((r) => r.payload?.text);
+  // ── Filter out scrambled / incomplete legal chunks ────────
+  // Chunks that are mojibake-heavy, too short, or end mid-sentence
+  // are dropped before they reach the prompt or the sources list.
+  const rawLegalChunks = legalResults.filter((r) => r.payload?.text);
+  const legalChunks = rawLegalChunks.filter((r) => isCleanChunk(r.payload.text));
+
+  log("Chunk quality filter", {
+    before: rawLegalChunks.length,
+    after: legalChunks.length,
+    dropped: rawLegalChunks.length - legalChunks.length,
+  });
+
   const legalContext = legalChunks
     .map((r) => {
       const src = r.payload?.source ? `[Source: ${r.payload.source}]` : "";
