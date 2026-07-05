@@ -1,4 +1,5 @@
 // src/controllers/wallet.controller.js
+import crypto from "crypto";
 import User from "../models/User.js";
 import Transaction from "../models/Transaction.js";
 
@@ -10,6 +11,27 @@ export async function getWalletBalance(req, res) {
 
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    /* ── Auto-heal missing referral code ──────────────────
+       Existing users who registered before Phase 4 won't
+       have a referralCode. Generate one on the fly and
+       save it so they never see the missing button again.
+    ───────────────────────────────────────────────────── */
+    if (!user.referralCode) {
+      let code;
+      let exists = true;
+
+      // Keep generating until we find a unique code
+      while (exists) {
+        code   = crypto.randomBytes(4).toString("hex").toUpperCase();
+        exists = await User.exists({ referralCode: code });
+      }
+
+      user.referralCode = code;
+      await user.save();
+
+      console.log(`[wallet] Generated missing referralCode for user: ${user._id} → ${code}`);
     }
 
     return res.json({
