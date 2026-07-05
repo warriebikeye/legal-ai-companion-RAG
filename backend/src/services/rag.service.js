@@ -67,11 +67,16 @@ function sanitizeText(text = "") {
 
    Rejects chunks that:
    - Are too short to be useful (< 40 chars)
-   - End mid-sentence without terminal punctuation, suggesting
-     the chunk was cut off at an arbitrary byte boundary
+   - Contain replacement characters (U+FFFD) from bad decoding
    - Contain a high density of mojibake characters (â, Ã, ï¿½)
      indicating the raw bytes were misread as Latin-1
-   - Contain replacement characters (U+FFFD) from bad decoding
+
+   NOTE: Terminal punctuation check was intentionally removed.
+   Legal documents — especially Nigerian statutes — regularly
+   end chunks with numbered subsections like "(4) a father"
+   or section headers with no terminal punctuation.
+   That check was incorrectly rejecting valid legal content
+   and causing "no information found" responses.
 ========================================================= */
 function isCleanChunk(text = "") {
   if (!text || text.trim().length < 40) return false;
@@ -83,11 +88,6 @@ function isCleanChunk(text = "") {
   const mojibakeMatches = (text.match(/[âÃï]/g) || []).length;
   const mojibakeDensity = mojibakeMatches / text.length;
   if (mojibakeDensity > 0.02) return false; // >2% of chars are artifacts → reject
-
-  // Reject if text ends mid-sentence (no terminal punctuation in last 60 chars)
-  const tail = text.trimEnd().slice(-60);
-  const hasTerminalPunct = /[.!?;:"')\]>]$/.test(tail);
-  if (!hasTerminalPunct) return false;
 
   return true;
 }
@@ -166,9 +166,11 @@ async function buildRAGContext(query, country, extraContext = "", options = {}) 
     .map((c) => c.text?.slice(0, contextLimits.maxContextChunkLength))
     .join("\n\n");
 
-  // ── Filter out scrambled / incomplete legal chunks ────────
-  // Chunks that are mojibake-heavy, too short, or end mid-sentence
-  // are dropped before they reach the prompt or the sources list.
+  // ── Filter out scrambled legal chunks ─────────────────────
+  // Only rejects truly corrupted chunks (mojibake, replacement
+  // chars, too short). Terminal punctuation check removed —
+  // Nigerian statutes end sections without terminal punctuation
+  // and were being incorrectly filtered out.
   const rawLegalChunks = legalResults.filter((r) => r.payload?.text);
   const legalChunks = rawLegalChunks.filter((r) => isCleanChunk(r.payload.text));
 
