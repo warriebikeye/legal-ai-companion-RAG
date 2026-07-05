@@ -111,7 +111,7 @@ UserSchema.pre("save", function (next) {
       .toString("hex")
       .toUpperCase();
   }
-  next();
+  
 });
 
 export default mongoose.model("User", UserSchema);
