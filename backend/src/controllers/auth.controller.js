@@ -2,14 +2,34 @@
 import passport from "passport";
 import bcrypt from "bcryptjs";
 import User from "../models/User.js";
-import { sendVerificationEmail } from "../utils/mailer.js";
+import Transaction from "../models/Transaction.js";
+import {
+  sendVerificationEmail,
+  sendReferralRewardEmail,
+} from "../utils/mailer.js";
 import { setAuthCookie, clearAuthCookie } from "../utils/setAuthCookie.js";
+import { REFERRAL_REWARD, TOKEN_EXPIRY_DAYS } from "../config/tokens.js";
+
+/* ─── Helper ─── */
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
 
 /* =========================================================
-   REGISTER — create unverified user, send 6-digit token
+   REGISTER
+   Accepts optional referralCode from body or ?ref= query
 ========================================================= */
 export const register = async (req, res) => {
   const { email, password, name } = req.body;
+
+  // Read referral code from body or query string
+  const referralCode = (
+    req.body.referralCode ||
+    req.query.ref ||
+    ""
+  ).toUpperCase().trim();
 
   if (!email || !password || !name) {
     return res.status(400).json({ error: "All fields are required." });
@@ -22,29 +42,50 @@ export const register = async (req, res) => {
       return res.status(409).json({ error: "Email already registered. Please log in." });
     }
 
+    /* ── Resolve referrer ── */
+    let referrer = null;
+    if (referralCode) {
+      referrer = await User.findOne({ referralCode });
+      if (referrer) {
+        console.log(`[register] Referral matched: ${referralCode} → ${referrer.email}`);
+      } else {
+        console.warn(`[register] Referral code not found: ${referralCode}`);
+      }
+    }
+
     const token  = String(Math.floor(100000 + Math.random() * 900000));
     const expiry = new Date(Date.now() + 15 * 60 * 1000);
     const hashed = await bcrypt.hash(password, 12);
 
     if (existing && !existing.isVerified) {
-      existing.password        = hashed;
-      existing.name            = name;
-      existing.verifyToken     = token;
+      existing.password          = hashed;
+      existing.name              = name;
+      existing.verifyToken       = token;
       existing.verifyTokenExpiry = expiry;
+      // Update referredBy if not already set
+      if (referrer && !existing.referredBy) {
+        existing.referredBy = referrer._id;
+      }
       await existing.save();
     } else {
       await User.create({
         email,
         name,
-        password: hashed,
-        isVerified: false,
-        verifyToken: token,
+        password:          hashed,
+        isVerified:        false,
+        verifyToken:       token,
         verifyTokenExpiry: expiry,
+        referredBy:        referrer ? referrer._id : null,
       });
     }
 
     await sendVerificationEmail(email, token);
-    return res.json({ success: true, message: "Verification code sent." });
+
+    return res.json({
+      success:     true,
+      message:     "Verification code sent.",
+      hasReferral: !!referrer,
+    });
 
   } catch (err) {
     console.error("[register]", err);
@@ -53,7 +94,8 @@ export const register = async (req, res) => {
 };
 
 /* =========================================================
-   VERIFY EMAIL — confirm token, log user in, set cookie
+   VERIFY EMAIL
+   Triggers referral reward if referredBy is set
 ========================================================= */
 export const verifyEmail = async (req, res) => {
   const { email, token } = req.body;
@@ -65,8 +107,8 @@ export const verifyEmail = async (req, res) => {
   try {
     const user = await User.findOne({ email });
 
-    if (!user)                           return res.status(404).json({ error: "User not found." });
-    if (user.verifyToken !== token)      return res.status(400).json({ error: "Invalid code." });
+    if (!user)                              return res.status(404).json({ error: "User not found." });
+    if (user.verifyToken !== token)         return res.status(400).json({ error: "Invalid code." });
     if (user.verifyTokenExpiry < new Date()) {
       return res.status(400).json({ error: "Code expired. Please register again." });
     }
@@ -76,10 +118,15 @@ export const verifyEmail = async (req, res) => {
     user.verifyTokenExpiry = undefined;
     await user.save();
 
+    /* ── Fire referral reward after verify — non-blocking ── */
+    if (user.referredBy) {
+      creditReferralReward(user).catch((err) => {
+        console.error("[verifyEmail] Referral reward failed (non-fatal):", err.message);
+      });
+    }
+
     req.logIn(user, (err) => {
       if (err) return res.status(500).json({ error: "Login after verify failed." });
-
-      // ✅ Set persistent auth cookie
       setAuthCookie(res, user);
       return res.json({ success: true });
     });
@@ -91,7 +138,71 @@ export const verifyEmail = async (req, res) => {
 };
 
 /* =========================================================
-   LOGIN — email + password, set cookie
+   CREDIT REFERRAL REWARD (internal)
+   Called after referee verifies email.
+   Credits both referee and referrer 75 tokens each.
+   Idempotent — checks for existing reward first.
+========================================================= */
+async function creditReferralReward(referee) {
+  console.log(`[referral] Processing reward for: ${referee.email}`);
+
+  /* ── Idempotency — prevent double crediting ── */
+  const alreadyRewarded = await Transaction.findOne({
+    user:   referee._id,
+    action: "referral_reward",
+  });
+
+  if (alreadyRewarded) {
+    console.log(`[referral] Already credited to ${referee.email} — skipping`);
+    return;
+  }
+
+  const referrer = await User.findById(referee.referredBy);
+  if (!referrer) {
+    console.warn(`[referral] Referrer not found for ${referee.email}`);
+    return;
+  }
+
+  const expiresAt = addDays(new Date(), TOKEN_EXPIRY_DAYS);
+
+  /* ── Credit referee ── */
+  referee.wallet += REFERRAL_REWARD;
+  await referee.save();
+
+  await Transaction.create({
+    user:      referee._id,
+    type:      "credit",
+    tokens:    REFERRAL_REWARD,
+    action:    "referral_reward",
+    expiresAt,
+    status:    "success",
+  });
+
+  console.log(`[referral] Credited ${REFERRAL_REWARD} tokens to referee: ${referee.email}`);
+
+  /* ── Credit referrer ── */
+  referrer.wallet        += REFERRAL_REWARD;
+  referrer.referralCount += 1;
+  await referrer.save();
+
+  await Transaction.create({
+    user:      referrer._id,
+    type:      "credit",
+    tokens:    REFERRAL_REWARD,
+    action:    "referral_reward",
+    expiresAt,
+    status:    "success",
+  });
+
+  console.log(`[referral] Credited ${REFERRAL_REWARD} tokens to referrer: ${referrer.email}`);
+
+  /* ── Email both parties — non-blocking ── */
+  sendReferralRewardEmail(referee.email,  referee.name,  REFERRAL_REWARD, false).catch(() => {});
+  sendReferralRewardEmail(referrer.email, referrer.name, REFERRAL_REWARD, true).catch(() => {});
+}
+
+/* =========================================================
+   LOGIN
 ========================================================= */
 export const login = async (req, res) => {
   const { email, password } = req.body;
@@ -118,8 +229,6 @@ export const login = async (req, res) => {
 
     req.logIn(user, (err) => {
       if (err) return res.status(500).json({ error: "Login failed." });
-
-      // ✅ Set persistent auth cookie
       setAuthCookie(res, user);
       return res.json({ success: true });
     });
@@ -134,9 +243,8 @@ export const login = async (req, res) => {
    GOOGLE AUTH
 ========================================================= */
 export const googleAuth = (req, res, next) => {
-  if (req.query.intent)       req.session.intent      = req.query.intent;
-  if (req.query.redirect_to)  req.session.redirect_to = req.query.redirect_to;
-
+  if (req.query.intent)      req.session.intent      = req.query.intent;
+  if (req.query.redirect_to) req.session.redirect_to = req.query.redirect_to;
   passport.authenticate("google", { scope: ["profile", "email"] })(req, res, next);
 };
 
@@ -147,13 +255,10 @@ export const googleCallback = (req, res, next) => {
 
     req.logIn(user, (loginErr) => {
       if (loginErr) return next(loginErr);
-
-      // ✅ Set persistent auth cookie for Google users too
       setAuthCookie(res, user);
 
-      const isMobile     = req.session.intent === "1";
+      const isMobile      = req.session.intent === "1";
       const appRedirectTo = req.session.redirect_to;
-
       delete req.session.intent;
       delete req.session.redirect_to;
 
@@ -172,43 +277,37 @@ export const googleCallback = (req, res, next) => {
 };
 
 /* =========================================================
-   ME — still available as fallback / forced refresh
+   ME
 ========================================================= */
 export function me(req, res) {
   if (!req.user) {
     return res.json({ isAuthenticated: false });
   }
 
-  // ✅ Refresh cookie on every /auth/me call so active users
-  //    never hit expiry (rolling 30-day window)
   setAuthCookie(res, req.user);
 
   res.json({
-    isAuthenticated:    true,
-    user:               req.user,
-    userEmail:          req.user.email,
-    userImage:          req.user.photo,
-    name:               req.user.name,
-    subscriptionTier:   req.user.subscriptionTier,
-    subscriptionStatus: req.user.subscriptionStatus,
-    subscriptionPlan:   req.user.subscriptionPlan,
+    isAuthenticated:       true,
+    user:                  req.user,
+    userEmail:             req.user.email,
+    userImage:             req.user.photo,
+    name:                  req.user.name,
+    subscriptionTier:      req.user.subscriptionTier,
+    subscriptionStatus:    req.user.subscriptionStatus,
+    subscriptionPlan:      req.user.subscriptionPlan,
     subscriptionExpiresAt: req.user.subscriptionExpiresAt,
   });
 }
 
 /* =========================================================
-   LOGOUT — clear session + auth cookie
+   LOGOUT
 ========================================================= */
 export const logout = (req, res, next) => {
   req.logout((err) => {
     if (err) return next(err);
-
     req.session?.destroy(() => {
       res.clearCookie("connect.sid");
-
-      // ✅ Also clear the persistent auth cookie
       clearAuthCookie(res);
-
       return res.json({ success: true });
     });
   });

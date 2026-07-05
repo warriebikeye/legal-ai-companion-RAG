@@ -49,6 +49,7 @@ import paymentRoutes from "./routes/payment.routes.js";
 import askRoutes from "./routes/ask.js";
 import voiceRoutes from "./routes/voice.js";
 import ingestRoutes from "./routes/ingest.js";
+import referralRouter from "./routes/referral.routes.js";
 import violationRoutes from "./routes/violation.route.js";
 import authRoutes from "./routes/auth.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
@@ -241,6 +242,7 @@ async function startServer() {
       app.use("/ask", ingestRoutes);
       app.use("/admin", adminRoutes);
       app.use("/report", violationRoutes);
+      app.use("/api/referral", referralRouter);
       app.use("/conversations", conversationRoutes);
       app.use("/subscription", subscriptionRoutes);
       app.use("/api/wallet", walletRouter);
