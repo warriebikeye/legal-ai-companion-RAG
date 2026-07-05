@@ -1,4 +1,6 @@
+// src/models/User.js
 import mongoose from "mongoose";
+import crypto from "crypto";
 
 const UserSchema = new mongoose.Schema(
   {
@@ -9,31 +11,21 @@ const UserSchema = new mongoose.Schema(
       index: true,
       sparse: true,
     },
-
     email: {
       type: String,
       required: true,
       index: true,
     },
-    // Add to your existing User schema
-    password: { type: String },           // hashed, optional (Google users won't have it)
+    password: { type: String },
     isVerified: { type: Boolean, default: false },
     verifyToken: { type: String },
     verifyTokenExpiry: { type: Date },
-    name: {
-      type: String,
-      default: "",
-    },
-
-    photo: {
-      type: String,
-      default: "",
-    },
+    name: { type: String, default: "" },
+    photo: { type: String, default: "" },
 
     /* =========================================
        Role
     ========================================= */
-
     role: {
       type: String,
       enum: ["user", "admin"],
@@ -42,80 +34,84 @@ const UserSchema = new mongoose.Schema(
     },
 
     /* =========================================
-       Subscription
+       Subscription — kept intact for backwards
+       compatibility during transition
     ========================================= */
-
     subscriptionTier: {
       type: String,
-      enum: [
-        "free",
-        "premium",
-        "enterprise",
-      ],
+      enum: ["free", "premium", "enterprise"],
       default: "free",
       index: true,
     },
-
     subscriptionStatus: {
       type: String,
-      enum: [
-        "inactive",
-        "active",
-        "expired",
-        "cancelled",
-      ],
+      enum: ["inactive", "active", "expired", "cancelled"],
       default: "inactive",
     },
-
     subscriptionPlan: {
       type: String,
-      enum: [
-        "daily",
-        "weekly",
-        "monthly",
-        "yearly",
-        null,
-      ],
+      enum: ["daily", "weekly", "monthly", "yearly", null],
       default: null,
     },
-
-    subscriptionStartDate: {
-      type: Date,
-      default: null,
-    },
-
-    subscriptionEndDate: {
-      type: Date,
-      default: null,
-      index: true,
-    },
+    subscriptionStartDate: { type: Date, default: null },
+    subscriptionEndDate:   { type: Date, default: null, index: true },
 
     /* =========================================
        Usage Tracking
     ========================================= */
+    dailyRequestCount: { type: Number, default: 0 },
+    lastRequestDate:   { type: Date, default: null },
+    lastActiveAt:      { type: Date, default: null, index: true },
 
-    dailyRequestCount: {
+    /* =========================================
+       Token Wallet — Phase 1
+    ========================================= */
+    wallet: {
       type: Number,
       default: 0,
     },
-
-    lastRequestDate: {
+    dailyFreeTokens: {
+      type: Number,
+      default: 4,
+    },
+    lastFreeReset: {
       type: Date,
+      default: Date.now,
+    },
+
+    /* =========================================
+       Referral — Phase 4 (fields added now,
+       logic comes later)
+    ========================================= */
+    referralCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    referredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
       default: null,
     },
-//
-    lastActiveAt: {
-      type: Date,
-      default: null,
-      index: true,
+    referralCount: {
+      type: Number,
+      default: 0,
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-export default mongoose.model(
-  "User",
-  UserSchema
-);
+/* =========================================
+   Auto-generate referral code on first save
+========================================= */
+UserSchema.pre("save", function (next) {
+  if (!this.referralCode) {
+    this.referralCode = crypto
+      .randomBytes(4)
+      .toString("hex")
+      .toUpperCase();
+  }
+  next();
+});
+
+export default mongoose.model("User", UserSchema);

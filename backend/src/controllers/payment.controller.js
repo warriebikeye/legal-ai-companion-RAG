@@ -1,396 +1,245 @@
+// src/controllers/payment.controller.js
 import axios from "axios";
-
 import User from "../models/User.js";
-
-
-/* =========================================
-   VERIFY PAYMENT
-========================================= */
-
-export const verifyPayment =
-  async (req, res) => {
-    console.log(
-      "\n========================================"
-    );
-
-    console.log(
-      "VERIFY PAYMENT CONTROLLER STARTED"
-    );
-
-    console.log(
-      "REQUEST TIME:",
-      new Date().toISOString()
-    );
-
-    try {
-      /* =========================================
-         REQUEST BODY
-      ========================================= */
-
-      console.log(
-        "RAW REQUEST BODY:",
-        req.body
-      );
-
-      const {
-        transactionId,
-        txRef,
-      } = req.body;
-
-      console.log(
-        "EXTRACTED PAYMENT DATA:",
-        {
-          transactionId,
-          txRef,
-        }
-      );
-
-      /* =========================================
-         VALIDATE TRANSACTION ID
-      ========================================= */
-
-      if (!transactionId) {
-        console.log(
-          "TRANSACTION ID MISSING"
-        );
-
-        return res.status(400).json({
-          success: false,
-          message:
-            "Transaction ID is required.",
-        });
-      }
-
-      console.log(
-        "TRANSACTION ID VALIDATED"
-      );
-
-      /* =========================================
-         VERIFY WITH FLUTTERWAVE
-      ========================================= */
-
-      console.log(
-        "CALLING FLUTTERWAVE VERIFY API..."
-      );
-
-      console.log(
-        "VERIFY URL:",
-        `https://api.flutterwave.com/v3/transactions/${transactionId}/verify`
-      );
-
-      const FLUTTERWAVE_SECRET_KEY =
-        process.env.FLW_SECRET_KEY;
-      console.log(
-        "FLW SECRET:",
-        process.env.FLW_SECRET_KEY
-      );
-
-      const flutterwaveResponse =
-        await axios.get(
-          `https://api.flutterwave.com/v3/transactions/${transactionId}/verify`,
-          {
-            headers: {
-              Authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`,
-            },
-          }
-        );
-
-      console.log(
-        "FLUTTERWAVE API CALL SUCCESSFUL"
-      );
-
-      const paymentData =
-        flutterwaveResponse.data;
-
-      console.log(
-        "FULL FLUTTERWAVE RESPONSE:"
-      );
-
-      console.log(
-        JSON.stringify(
-          paymentData,
-          null,
-          2
-        )
-      );
-
-      /* =========================================
-         VALIDATE FLUTTERWAVE RESPONSE
-      ========================================= */
-
-      console.log(
-        "VALIDATING FLUTTERWAVE RESPONSE STATUS..."
-      );
-
-      if (
-        paymentData.status !==
-        "success"
-      ) {
-        console.log(
-          "FLUTTERWAVE RESPONSE STATUS FAILED"
-        );
-
-        return res.status(400).json({
-          success: false,
-          message:
-            "Payment verification failed.",
-        });
-      }
-
-      console.log(
-        "FLUTTERWAVE RESPONSE STATUS VALID"
-      );
-
-      const payment =
-        paymentData.data;
-
-      console.log(
-        "PAYMENT DATA:",
-        payment
-      );
-
-      /* =========================================
-         VALIDATE PAYMENT STATUS
-      ========================================= */
-
-      console.log(
-        "CHECKING PAYMENT STATUS..."
-      );
-
-      if (
-        payment.status !==
-        "successful"
-      ) {
-        console.log(
-          "PAYMENT STATUS NOT SUCCESSFUL:",
-          payment.status
-        );
-
-        return res.status(400).json({
-          success: false,
-          message:
-            "Payment not successful.",
-        });
-      }
-
-      console.log(
-        "PAYMENT STATUS VERIFIED SUCCESSFULLY"
-      );
-
-      /* =========================================
-         AUTHENTICATED USER CHECK
-      ========================================= */
-
-      console.log(
-        "CHECKING AUTHENTICATED USER..."
-      );
-
-      console.log(
-        "REQ.USER:",
-        req.user
-      );
-
-      if (!req.user) {
-        console.log(
-          "NO AUTHENTICATED USER FOUND"
-        );
-
-        return res.status(401).json({
-          success: false,
-          message:
-            "Unauthorized.",
-        });
-      }
-
-      console.log(
-        "AUTHENTICATED USER VERIFIED"
-      );
-
-      /* =========================================
-         FETCH USER FROM DATABASE
-      ========================================= */
-
-      console.log(
-        "FETCHING USER FROM DATABASE..."
-      );
-
-      const user =
-        await User.findById(
-          req.user._id
-        );
-
-      console.log(
-        "DATABASE USER RESULT:",
-        user
-      );
-
-      if (!user) {
-        console.log(
-          "USER NOT FOUND IN DATABASE"
-        );
-
-        return res.status(404).json({
-          success: false,
-          message:
-            "User not found.",
-        });
-      }
-
-      console.log(
-        "USER FOUND SUCCESSFULLY"
-      );
-
-      /* =========================================
-         DETERMINE SUBSCRIPTION PLAN
-      ========================================= */
-
-      console.log(
-        "DETERMINING SUBSCRIPTION PLAN..."
-      );
-
-      const amount =
-        payment.amount;
-
-      console.log(
-        "PAYMENT AMOUNT:",
-        amount
-      );
-
-      let subscriptionType =
-        "daily";
-
-      let expiryDate =
-        new Date();
-
-      /*
-        ₦300 = daily
-        ₦4800 = monthly
-      */
-
-      if (amount >= 4800) {
-        subscriptionType =
-          "monthly";
-
-        expiryDate.setDate(
-          expiryDate.getDate() + 30
-        );
-
-        console.log(
-          "MONTHLY PLAN DETECTED"
-        );
-      } else {
-        expiryDate.setDate(
-          expiryDate.getDate() + 1
-        );
-
-        console.log(
-          "DAILY PLAN DETECTED"
-        );
-      }
-
-      console.log(
-        "SUBSCRIPTION DETAILS:",
-        {
-          subscriptionType,
-          expiryDate,
-        }
-      );
-
-      /* =========================================
-         UPDATE USER SUBSCRIPTION
-      ========================================= */
-
-      console.log(
-        "UPDATING USER SUBSCRIPTION..."
-      );
-
-      user.subscriptionTier =
-        "premium";
-
-      user.subscriptionType =
-        subscriptionType;
-
-      user.subscriptionExpiry =
-        expiryDate;
-
-      user.lastPaymentReference =
-        txRef;
-
-      console.log(
-        "SAVING USER..."
-      );
-
-      await user.save();
-
-      console.log(
-        "USER SAVE SUCCESSFUL"
-      );
-
-      console.log(
-        "UPDATED USER:",
-        {
-          userId: user._id,
-          subscriptionTier:
-            user.subscriptionTier,
-          subscriptionType:
-            user.subscriptionType,
-          subscriptionExpiry:
-            user.subscriptionExpiry,
-          lastPaymentReference:
-            user.lastPaymentReference,
-        }
-      );
-
-      console.log(
-        "VERIFY PAYMENT FLOW COMPLETED SUCCESSFULLY"
-      );
-
-      console.log(
-        "========================================\n"
-      );
-
-      return res.json({
-        success: true,
-        message:
-          "Payment verified successfully.",
-
-        subscriptionTier:
-          user.subscriptionTier,
-
-        subscriptionType:
-          user.subscriptionType,
-
-        subscriptionExpiry:
-          user.subscriptionExpiry,
-      });
-    } catch (error) {
-      console.error(
-        "\nVERIFY PAYMENT ERROR OCCURRED"
-      );
-
-      console.error(
-        "ERROR MESSAGE:",
-        error.message
-      );
-
-      console.error(
-        "ERROR RESPONSE:",
-        error.response?.data
-      );
-
-      console.error(
-        "FULL ERROR:",
-        error
-      );
-
-      console.log(
-        "========================================\n"
-      );
-
-      return res.status(500).json({
+import Transaction from "../models/Transaction.js";
+import { BUNDLES, TOKEN_EXPIRY_DAYS } from "../config/tokens.js";
+
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+/* =========================================================
+   POST /payments/verify
+   Body: { transactionId, txRef, bundleId }
+========================================================= */
+export async function verifyPayment(req, res) {
+  console.log("\n[verifyPayment] Started:", new Date().toISOString());
+
+  try {
+    const { transactionId, txRef, bundleId } = req.body;
+
+    if (!transactionId) {
+      return res.status(400).json({
         success: false,
-        message:
-          "Internal server error.",
+        message: "transactionId is required",
       });
     }
-  };
+
+    if (!bundleId) {
+      return res.status(400).json({
+        success: false,
+        message: "bundleId is required",
+      });
+    }
+
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    /* ─── Find bundle by ID — no amount matching needed ─── */
+    const bundle = BUNDLES.find((b) => b.id === bundleId);
+
+    if (!bundle) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid bundle: ${bundleId}`,
+      });
+    }
+
+    console.log("[verifyPayment] Bundle identified:", bundle.id, "→", bundle.tokens, "tokens");
+
+    /* ─── Duplicate check — prevent double crediting ─── */
+    const existing = await Transaction.findOne({
+      flwReference: String(transactionId),
+    });
+
+    if (existing) {
+      console.warn("[verifyPayment] Duplicate transaction:", transactionId);
+      return res.status(409).json({
+        success: false,
+        message: "Transaction already processed",
+      });
+    }
+
+    /* ─── Verify with Flutterwave — confirm payment succeeded ─── */
+    console.log("[verifyPayment] Calling FLW API...");
+    const flwResponse = await axios.get(
+      `https://api.flutterwave.com/v3/transactions/${transactionId}/verify`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
+        },
+      }
+    );
+
+    const payment = flwResponse.data?.data;
+
+    console.log("[verifyPayment] FLW response:", {
+      status:   payment?.status,
+      amount:   payment?.amount,
+      currency: payment?.currency,
+    });
+
+    if (!payment || payment.status !== "successful") {
+      return res.status(400).json({
+        success: false,
+        message: "Payment not successful",
+      });
+    }
+
+    /* ─── Fetch user ─── */
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    /* ─── Credit wallet ─── */
+    user.wallet += bundle.tokens;
+    await user.save();
+
+    /* ─── Log credit transaction ─── */
+    await Transaction.create({
+      user:         user._id,
+      type:         "credit",
+      tokens:       bundle.tokens,
+      action:       "topup",
+      bundleId:     bundle.id,
+      flwReference: String(transactionId),
+      expiresAt:    addDays(new Date(), TOKEN_EXPIRY_DAYS),
+      status:       "success",
+    });
+
+    console.log("[verifyPayment] Wallet credited:", {
+      userId:  user._id,
+      bundle:  bundle.id,
+      tokens:  bundle.tokens,
+      balance: user.wallet,
+    });
+
+    return res.json({
+      success: true,
+      message: "Wallet topped up successfully",
+      bundle:  bundle.label,
+      tokens:  bundle.tokens,
+      wallet:  user.wallet,
+    });
+
+  } catch (err) {
+    console.error("[verifyPayment] Error:", err.message, err.response?.data);
+    return res.status(500).json({
+      success: false,
+      message: "Payment verification failed",
+    });
+  }
+}
+
+/* =========================================================
+   POST /payments/webhook
+   Backup — credits wallet if redirect was missed
+   Uses tx_ref to look up bundleId from existing
+   pending logic — webhook gets bundleId from meta
+========================================================= */
+export async function flutterwaveWebhook(req, res) {
+  try {
+    /* ─── Verify webhook signature ─── */
+    const hash = req.headers["verif-hash"];
+    if (!hash || hash !== process.env.FLW_WEBHOOK_HASH) {
+      console.warn("[webhook] Invalid signature");
+      return res.status(401).json({ error: "Invalid signature" });
+    }
+
+    const event   = req.body;
+    const payment = event.data;
+
+    console.log("[webhook] Event:", event.event, payment?.id);
+
+    if (
+      event.event !== "charge.completed" ||
+      payment?.status !== "successful"
+    ) {
+      return res.status(200).json({ received: true });
+    }
+
+    /* ─── Duplicate check ─── */
+    const existing = await Transaction.findOne({
+      flwReference: String(payment.id),
+    });
+
+    if (existing) {
+      console.log("[webhook] Already processed:", payment.id);
+      return res.status(200).json({ received: true });
+    }
+
+    /* ─── Extract bundleId from tx_ref ───────────────────
+       tx_ref format from Flutterwave redirect URL will be
+       whatever FLW generates. We extract bundleId from the
+       redirect URL meta that FLW sends in the webhook body.
+       FLW includes the redirect_url in webhook payload so
+       we parse bundle= from it.
+    ───────────────────────────────────────────────────── */
+    let bundleId = null;
+
+    try {
+      const redirectUrl = payment?.meta?.redirect || payment?.redirect_url || "";
+      const urlParams   = new URL(redirectUrl).searchParams;
+      bundleId          = urlParams.get("bundle");
+    } catch {
+      // redirect_url not parseable — try meta directly
+      bundleId = payment?.meta?.bundleId || null;
+    }
+
+    if (!bundleId) {
+      console.error("[webhook] Could not extract bundleId from payment meta");
+      return res.status(200).json({ received: true });
+    }
+
+    const bundle = BUNDLES.find((b) => b.id === bundleId);
+    if (!bundle) {
+      console.error("[webhook] Invalid bundleId:", bundleId);
+      return res.status(200).json({ received: true });
+    }
+
+    /* ─── Find user by email ─── */
+    const user = await User.findOne({ email: payment.customer?.email });
+    if (!user) {
+      console.error("[webhook] User not found:", payment.customer?.email);
+      return res.status(200).json({ received: true });
+    }
+
+    /* ─── Credit wallet ─── */
+    user.wallet += bundle.tokens;
+    await user.save();
+
+    /* ─── Log transaction ─── */
+    await Transaction.create({
+      user:         user._id,
+      type:         "credit",
+      tokens:       bundle.tokens,
+      action:       "topup",
+      bundleId:     bundle.id,
+      flwReference: String(payment.id),
+      expiresAt:    addDays(new Date(), TOKEN_EXPIRY_DAYS),
+      status:       "success",
+    });
+
+    console.log("[webhook] Wallet credited:", {
+      userId: user._id,
+      bundle: bundle.id,
+      tokens: bundle.tokens,
+    });
+
+    return res.status(200).json({ received: true });
+
+  } catch (err) {
+    console.error("[webhook] Error:", err.message);
+    return res.status(200).json({ received: true });
+  }
+}

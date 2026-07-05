@@ -1,7 +1,12 @@
+// src/routes/ask.js
 import express from 'express';
 import multer from 'multer';
 import { requireAuth } from "../middleware/requireAuth.js";
-import { handleTextQuery, handleTextQueryStream } from '../controllers/ask.controller.js';
+import tokenGate from "../middleware/tokenGate.js";
+import {
+  handleTextQuery,
+  handleTextQueryStream,
+} from '../controllers/ask.controller.js';
 
 const upload = multer();
 const router = express.Router();
@@ -39,23 +44,34 @@ const router = express.Router();
  *     responses:
  *       200:
  *         description: Returns legal answer with sources
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 answer:
- *                   type: string
- *                 sources:
- *                   type: array
- *                   items:
- *                     type: string
  *       400:
  *         description: Query is missing
+ *       402:
+ *         description: Insufficient tokens
  *       500:
  *         description: Server error
  */
-//router.post('/text', handleTextQuery);
-router.post('/text',requireAuth, upload.array('files'), handleTextQuery);
-router.post("/stream", requireAuth, upload.array("files"), handleTextQueryStream);
+
+// Both routes:
+// 1. requireAuth   — user must be logged in
+// 2. upload        — multer processes files BEFORE tokenGate runs
+// 3. tokenGate     — auto-detects Q&A vs review from req.files
+// 4. handler       — only reached if token gate passes
+
+router.post(
+  '/text',
+  requireAuth,
+  upload.array('files'),
+  tokenGate('auto'),
+  handleTextQuery
+);
+
+router.post(
+  '/stream',
+  requireAuth,
+  upload.array('files'),
+  tokenGate('auto'),
+  handleTextQueryStream
+);
+
 export default router;
