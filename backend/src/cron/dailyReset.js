@@ -52,6 +52,8 @@ export async function runDailyReset() {
 }
 
 export function scheduleDailyReset() {
+  // Runs at midnight WAT
+  // Token expiry cron runs separately at 01:00 WAT — see cron/tokenExpiry.js
   cron.schedule("0 0 * * *", runDailyReset, {
     timezone: "Africa/Lagos",
   });
