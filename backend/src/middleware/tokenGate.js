@@ -3,16 +3,11 @@ import User from "../models/User.js";
 import Transaction from "../models/Transaction.js";
 import { COSTS, FREE_DAILY_TOKENS } from "../config/tokens.js";
 
-/**
- * tokenGate(action | 'auto')
- *
- * 'auto' — detects Q&A vs review from req.files
- * Named function (not arrow) — prevents Express losing `next`
- * Uses req.originalUrl for stream detection — reliable across routers
- */
 const tokenGate = (action = "auto") => {
+  // Named function — critical for Express middleware chain stability
   return async function tokenGateMiddleware(req, res, next) {
 
+    // Explicit guard — if next isn't a function something is wrong upstream
     if (typeof next !== "function") {
       console.error("[tokenGate] FATAL: next is not a function");
       return res.status(500).json({ error: "Middleware configuration error" });
@@ -108,12 +103,15 @@ const tokenGate = (action = "auto") => {
 
     } catch (err) {
       console.error("[tokenGate] Error:", err.message);
+
       const isStream = req.originalUrl?.includes("stream") ?? false;
       if (isStream) {
         try {
           res.setHeader("Content-Type", "text/event-stream");
           res.flushHeaders();
-          res.write(`data: ${JSON.stringify({ type: "error", payload: "Token gate failed" })}\n\n`);
+          res.write(
+            `data: ${JSON.stringify({ type: "error", payload: "Token gate failed" })}\n\n`
+          );
           return res.end();
         } catch { /* already written */ }
       }
