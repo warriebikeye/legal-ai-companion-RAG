@@ -58,20 +58,18 @@ const router = express.Router();
 // 3. tokenGate     — auto-detects Q&A vs review from req.files
 // 4. handler       — only reached if token gate passes
 
-router.post(
-  '/text',
+router.post('/text', [
   requireAuth,
   upload.array('files'),
   tokenGate('auto'),
-  handleTextQuery
-);
+  handleTextQuery,
+]);
 
-router.post(
-  '/stream',
+router.post('/stream', [
   requireAuth,
   upload.array('files'),
   tokenGate('auto'),
-  handleTextQueryStream
-);
+  handleTextQueryStream,
+]);
 
 export default router;
