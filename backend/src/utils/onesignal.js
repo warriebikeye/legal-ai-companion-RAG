@@ -8,13 +8,22 @@ export async function sendPushNotification({ externalId, title, body, targetUrl,
   const appId  = process.env.ONESIGNAL_APP_ID;
   const apiKey = process.env.ONESIGNAL_REST_API_KEY;
 
+  console.log(`[OneSignal] ── sendPushNotification ──────────────────`);
+  console.log(`[OneSignal] externalId : ${externalId}`);
+  console.log(`[OneSignal] title      : ${title}`);
+  console.log(`[OneSignal] body       : ${body}`);
+  console.log(`[OneSignal] targetUrl  : ${targetUrl ?? "none"}`);
+  console.log(`[OneSignal] data       : ${data ? JSON.stringify(data) : "none"}`);
+  console.log(`[OneSignal] appId      : ${appId ? appId.slice(0, 8) + "..." : "MISSING"}`);
+  console.log(`[OneSignal] apiKey     : ${apiKey ? apiKey.slice(0, 6) + "..." : "MISSING"}`);
+
   if (!appId || !apiKey) {
-    console.warn("[OneSignal] Missing ONESIGNAL_APP_ID or ONESIGNAL_REST_API_KEY — skipping push.");
+    console.warn("[OneSignal] ❌ Missing ONESIGNAL_APP_ID or ONESIGNAL_REST_API_KEY — skipping push.");
     return null;
   }
 
   if (!externalId) {
-    console.warn("[OneSignal] No externalId provided — skipping push.");
+    console.warn("[OneSignal] ❌ No externalId provided — skipping push.");
     return null;
   }
 
@@ -28,6 +37,8 @@ export async function sendPushNotification({ externalId, title, body, targetUrl,
     ...(data      && { data }),
   };
 
+  console.log(`[OneSignal] Sending payload:`, JSON.stringify(payload, null, 2));
+
   try {
     const res = await fetch(ONESIGNAL_API, {
       method: "POST",
@@ -40,16 +51,27 @@ export async function sendPushNotification({ externalId, title, body, targetUrl,
 
     const result = await res.json();
 
+    console.log(`[OneSignal] Response status : ${res.status}`);
+    console.log(`[OneSignal] Response body   :`, JSON.stringify(result, null, 2));
+
     if (!res.ok) {
-      console.error("[OneSignal] Push failed:", result);
+      console.error(`[OneSignal] ❌ Push FAILED for ${externalId}:`, result);
       return null;
     }
 
-    console.log(`[OneSignal] Push sent to ${externalId}:`, result.id);
+    // OneSignal returns recipients: 0 when externalId has no matching subscription
+    if (result.recipients === 0) {
+      console.warn(`[OneSignal] ⚠️ Push sent but 0 recipients matched for externalId: ${externalId}`);
+      console.warn(`[OneSignal] ⚠️ This means the user has no active subscription linked to this email.`);
+      console.warn(`[OneSignal] ⚠️ Check OneSignal Audience → Subscriptions and confirm the external_id matches exactly.`);
+      return result;
+    }
+
+    console.log(`[OneSignal] ✅ Push delivered to ${result.recipients} recipient(s) for ${externalId}. Notification ID: ${result.id}`);
     return result;
 
   } catch (err) {
-    console.error("[OneSignal] Network error:", err.message);
+    console.error(`[OneSignal] ❌ Network error sending to ${externalId}:`, err.message);
     return null;
   }
 }
@@ -58,6 +80,7 @@ export async function sendPushNotification({ externalId, title, body, targetUrl,
    DAILY RESET NOTIFICATION
 ========================================================= */
 export async function sendDailyResetNotification(userEmail) {
+  console.log(`[OneSignal] → sendDailyResetNotification(${userEmail})`);
   return sendPushNotification({
     externalId: userEmail,
     title:      "Your queries have reset 🔄",
@@ -71,6 +94,7 @@ export async function sendDailyResetNotification(userEmail) {
    WELCOME NOTIFICATION
 ========================================================= */
 export async function sendWelcomeNotification(userEmail, userName) {
+  console.log(`[OneSignal] → sendWelcomeNotification(${userEmail})`);
   return sendPushNotification({
     externalId: userEmail,
     title:      `Welcome to Clauzify, ${userName?.split(" ")[0] || "there"} 👋`,
@@ -81,9 +105,10 @@ export async function sendWelcomeNotification(userEmail, userName) {
 }
 
 /* =========================================================
-   TOKEN EXPIRY WARNING NOTIFICATION — Phase 5
+   TOKEN EXPIRY WARNING NOTIFICATION
 ========================================================= */
 export async function sendTokenExpiryWarningPush(userEmail, tokens, daysLeft) {
+  console.log(`[OneSignal] → sendTokenExpiryWarningPush(${userEmail}, tokens=${tokens}, daysLeft=${daysLeft})`);
   return sendPushNotification({
     externalId: userEmail,
     title:      `⏳ ${tokens} tokens expiring in ${daysLeft} day${daysLeft > 1 ? "s" : ""}`,
