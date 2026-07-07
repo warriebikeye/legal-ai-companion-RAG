@@ -9,6 +9,7 @@ import {
 } from "../utils/mailer.js";
 import { setAuthCookie, clearAuthCookie } from "../utils/setAuthCookie.js";
 import { REFERRAL_REWARD, TOKEN_EXPIRY_DAYS } from "../config/tokens.js";
+import { sendDailyResetNotification } from "../utils/onesignal.js";
 
 /* ─── Helper ─── */
 function addDays(date, days) {
@@ -53,14 +54,14 @@ export const register = async (req, res) => {
       }
     }
 
-    const token  = String(Math.floor(100000 + Math.random() * 900000));
+    const token = String(Math.floor(100000 + Math.random() * 900000));
     const expiry = new Date(Date.now() + 15 * 60 * 1000);
     const hashed = await bcrypt.hash(password, 12);
 
     if (existing && !existing.isVerified) {
-      existing.password          = hashed;
-      existing.name              = name;
-      existing.verifyToken       = token;
+      existing.password = hashed;
+      existing.name = name;
+      existing.verifyToken = token;
       existing.verifyTokenExpiry = expiry;
       // Update referredBy if not already set
       if (referrer && !existing.referredBy) {
@@ -71,19 +72,19 @@ export const register = async (req, res) => {
       await User.create({
         email,
         name,
-        password:          hashed,
-        isVerified:        false,
-        verifyToken:       token,
+        password: hashed,
+        isVerified: false,
+        verifyToken: token,
         verifyTokenExpiry: expiry,
-        referredBy:        referrer ? referrer._id : null,
+        referredBy: referrer ? referrer._id : null,
       });
     }
 
     await sendVerificationEmail(email, token);
 
     return res.json({
-      success:     true,
-      message:     "Verification code sent.",
+      success: true,
+      message: "Verification code sent.",
       hasReferral: !!referrer,
     });
 
@@ -107,14 +108,14 @@ export const verifyEmail = async (req, res) => {
   try {
     const user = await User.findOne({ email });
 
-    if (!user)                              return res.status(404).json({ error: "User not found." });
-    if (user.verifyToken !== token)         return res.status(400).json({ error: "Invalid code." });
+    if (!user) return res.status(404).json({ error: "User not found." });
+    if (user.verifyToken !== token) return res.status(400).json({ error: "Invalid code." });
     if (user.verifyTokenExpiry < new Date()) {
       return res.status(400).json({ error: "Code expired. Please register again." });
     }
 
-    user.isVerified        = true;
-    user.verifyToken       = undefined;
+    user.isVerified = true;
+    user.verifyToken = undefined;
     user.verifyTokenExpiry = undefined;
     await user.save();
 
@@ -148,7 +149,7 @@ async function creditReferralReward(referee) {
 
   /* ── Idempotency — prevent double crediting ── */
   const alreadyRewarded = await Transaction.findOne({
-    user:   referee._id,
+    user: referee._id,
     action: "referral_reward",
   });
 
@@ -170,35 +171,35 @@ async function creditReferralReward(referee) {
   await referee.save();
 
   await Transaction.create({
-    user:      referee._id,
-    type:      "credit",
-    tokens:    REFERRAL_REWARD,
-    action:    "referral_reward",
+    user: referee._id,
+    type: "credit",
+    tokens: REFERRAL_REWARD,
+    action: "referral_reward",
     expiresAt,
-    status:    "success",
+    status: "success",
   });
 
   console.log(`[referral] Credited ${REFERRAL_REWARD} tokens to referee: ${referee.email}`);
 
   /* ── Credit referrer ── */
-  referrer.wallet        += REFERRAL_REWARD;
+  referrer.wallet += REFERRAL_REWARD;
   referrer.referralCount += 1;
   await referrer.save();
 
   await Transaction.create({
-    user:      referrer._id,
-    type:      "credit",
-    tokens:    REFERRAL_REWARD,
-    action:    "referral_reward",
+    user: referrer._id,
+    type: "credit",
+    tokens: REFERRAL_REWARD,
+    action: "referral_reward",
     expiresAt,
-    status:    "success",
+    status: "success",
   });
 
   console.log(`[referral] Credited ${REFERRAL_REWARD} tokens to referrer: ${referrer.email}`);
 
   /* ── Email both parties — non-blocking ── */
-  sendReferralRewardEmail(referee.email,  referee.name,  REFERRAL_REWARD, false).catch(() => {});
-  sendReferralRewardEmail(referrer.email, referrer.name, REFERRAL_REWARD, true).catch(() => {});
+  sendReferralRewardEmail(referee.email, referee.name, REFERRAL_REWARD, false).catch(() => { });
+  sendReferralRewardEmail(referrer.email, referrer.name, REFERRAL_REWARD, true).catch(() => { });
 }
 
 /* =========================================================
@@ -230,6 +231,7 @@ export const login = async (req, res) => {
     req.logIn(user, (err) => {
       if (err) return res.status(500).json({ error: "Login failed." });
       setAuthCookie(res, user);
+      sendDailyResetNotification(user.email);
       return res.json({ success: true });
     });
 
@@ -243,21 +245,21 @@ export const login = async (req, res) => {
    GOOGLE AUTH
 ========================================================= */
 export const googleAuth = (req, res, next) => {
-  if (req.query.intent)      req.session.intent      = req.query.intent;
+  if (req.query.intent) req.session.intent = req.query.intent;
   if (req.query.redirect_to) req.session.redirect_to = req.query.redirect_to;
   passport.authenticate("google", { scope: ["profile", "email"] })(req, res, next);
 };
 
 export const googleCallback = (req, res, next) => {
   passport.authenticate("google", { failureRedirect: "/" }, (err, user) => {
-    if (err)   return next(err);
+    if (err) return next(err);
     if (!user) return res.redirect("/");
 
     req.logIn(user, (loginErr) => {
       if (loginErr) return next(loginErr);
       setAuthCookie(res, user);
 
-      const isMobile      = req.session.intent === "1";
+      const isMobile = req.session.intent === "1";
       const appRedirectTo = req.session.redirect_to;
       delete req.session.intent;
       delete req.session.redirect_to;
@@ -287,14 +289,14 @@ export function me(req, res) {
   setAuthCookie(res, req.user);
 
   res.json({
-    isAuthenticated:       true,
-    user:                  req.user,
-    userEmail:             req.user.email,
-    userImage:             req.user.photo,
-    name:                  req.user.name,
-    subscriptionTier:      req.user.subscriptionTier,
-    subscriptionStatus:    req.user.subscriptionStatus,
-    subscriptionPlan:      req.user.subscriptionPlan,
+    isAuthenticated: true,
+    user: req.user,
+    userEmail: req.user.email,
+    userImage: req.user.photo,
+    name: req.user.name,
+    subscriptionTier: req.user.subscriptionTier,
+    subscriptionStatus: req.user.subscriptionStatus,
+    subscriptionPlan: req.user.subscriptionPlan,
     subscriptionExpiresAt: req.user.subscriptionExpiresAt,
   });
 }
