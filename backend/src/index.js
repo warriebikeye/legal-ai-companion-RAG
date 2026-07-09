@@ -217,7 +217,7 @@ async function startServer() {
        Hit this from your browser to test push delivery:
        GET https://legal-ai-companion-rag.onrender.com/test-push?email=you@email.com
     ===================================================== */
-    if (process.env.NODE_ENV !== "production") {
+    if (process.env.NODE_ENV == "production") {
       // Only available in development — never exposed in prod
       app.get("/test-push", async (req, res) => {
         try {
