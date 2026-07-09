@@ -213,6 +213,28 @@ async function startServer() {
     console.log("✅ Health check route enabled");
 
     /* =====================================================
+       ⚠️  TEMPORARY TEST ROUTE — REMOVE BEFORE LAUNCH
+       Hit this from your browser to test push delivery:
+       GET https://legal-ai-companion-rag.onrender.com/test-push?email=you@email.com
+    ===================================================== */
+    if (process.env.NODE_ENV !== "production") {
+      // Only available in development — never exposed in prod
+      app.get("/test-push", async (req, res) => {
+        try {
+          const { sendDailyResetNotification } = await import("./utils/onesignal.js");
+          const email = req.query.email || "Ebillsbusinesssolutions@outlook.com";
+          console.log(`[TEST-PUSH] Triggering test notification to: ${email}`);
+          const result = await sendDailyResetNotification(email);
+          return res.json({ success: true, email, result });
+        } catch (err) {
+          console.error("[TEST-PUSH] Error:", err.message);
+          return res.status(500).json({ success: false, error: err.message });
+        }
+      });
+      console.log("⚠️  Test push route enabled (development only): GET /test-push?email=...");
+    }
+
+    /* =====================================================
        ROOT ROUTE
     ===================================================== */
     app.get("/", (req, res) => {
