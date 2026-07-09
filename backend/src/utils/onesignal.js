@@ -33,6 +33,7 @@ export async function sendPushNotification({ externalId, title, body, targetUrl,
     target_channel:  "push",
     headings:        { en: title },
     contents:        { en: body },
+    ...(targetUrl && { url: targetUrl }),
     ...(data      && { data }),
   };
 
@@ -84,6 +85,7 @@ export async function sendDailyResetNotification(userEmail) {
     externalId: userEmail,
     title:      "Your queries have reset 🔄",
     body:       "Your daily legal queries are ready. Ask Clauzify anything.",
+    targetUrl: "deebees://home",
     data:       { type: "daily_reset" },
   });
 }
@@ -97,6 +99,7 @@ export async function sendWelcomeNotification(userEmail, userName) {
     externalId: userEmail,
     title:      `Welcome to Clauzify, ${userName?.split(" ")[0] || "there"} 👋`,
     body:       "Africa's legal intelligence is ready for your first question.",
+    targetUrl: "deebees://home",  
     data:       { type: "welcome" },
   });
 }
