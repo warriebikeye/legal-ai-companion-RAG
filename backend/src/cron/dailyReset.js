@@ -9,10 +9,9 @@ export async function runDailyReset() {
   console.log("[DailyReset] Starting daily free token reset...");
 
   try {
-    // Only reset users who actually used their free tokens today
+    // Reset all verified users, regardless of whether they used their free tokens today
     const usersToReset = await User.find({
-      isVerified:      true,
-      dailyFreeTokens: { $lt: FREE_DAILY_TOKENS },
+      isVerified: true,
     }).select("email name dailyFreeTokens");
 
     console.log(`[DailyReset] Found ${usersToReset.length} users to reset.`);
@@ -52,10 +51,11 @@ export async function runDailyReset() {
 }
 
 export function scheduleDailyReset() {
-  // Runs at midnight WAT
+  // TEMP: every 2 minutes for push notification testing.
+  // Revert to "0 0 * * *" (midnight WAT) once confirmed working.
   // Token expiry cron runs separately at 01:00 WAT — see cron/tokenExpiry.js
-  cron.schedule("0 0 * * *", runDailyReset, {
+  cron.schedule("*/2 * * * *", runDailyReset, {
     timezone: "Africa/Lagos",
   });
-  console.log("[DailyReset] Cron scheduled — runs at midnight WAT daily.");
+  console.log("[DailyReset] Cron scheduled — runs every 2 minutes (TEMP testing mode).");
 }
