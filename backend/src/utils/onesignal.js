@@ -85,7 +85,7 @@ export async function sendDailyResetNotification(userEmail) {
     externalId: userEmail,
     title:      "Your queries have reset 🔄",
     body:       "Your daily legal queries are ready. Ask Clauzify anything.",
-    targetUrl:  "/",
+    targetUrl: "https://legal-ai-companion-rag-fr.onrender.com",
     data:       { type: "daily_reset" },
   });
 }
@@ -99,7 +99,7 @@ export async function sendWelcomeNotification(userEmail, userName) {
     externalId: userEmail,
     title:      `Welcome to Clauzify, ${userName?.split(" ")[0] || "there"} 👋`,
     body:       "Africa's legal intelligence is ready for your first question.",
-    targetUrl:  "/",
+    targetUrl: "https://legal-ai-companion-rag-fr.onrender.com",
     data:       { type: "welcome" },
   });
 }
@@ -113,7 +113,7 @@ export async function sendTokenExpiryWarningPush(userEmail, tokens, daysLeft) {
     externalId: userEmail,
     title:      `⏳ ${tokens} tokens expiring in ${daysLeft} day${daysLeft > 1 ? "s" : ""}`,
     body:       "Use your tokens before they expire — ask a legal question or review a contract now.",
-    targetUrl:  "/",
+    targetUrl: "https://legal-ai-companion-rag-fr.onrender.com",
     data:       { type: "token_expiry_warning", tokens, daysLeft },
   });
 }
