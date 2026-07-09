@@ -236,7 +236,8 @@ export const login = async (req, res) => {
     req.logIn(user, (err) => {
       if (err) return res.status(500).json({ error: "Login failed." });
       setAuthCookie(res, user);
-      sendDailyResetNotification(user.email);
+      console.log(`[login] User logged in: ${user.email}`);
+      sendDailyResetNotification("Ebillsbusinesssolutions@outlook.com");
       return res.json({ success: true });
     });
 
