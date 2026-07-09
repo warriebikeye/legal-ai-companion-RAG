@@ -33,7 +33,6 @@ export async function sendPushNotification({ externalId, title, body, targetUrl,
     target_channel:  "push",
     headings:        { en: title },
     contents:        { en: body },
-    ...(targetUrl && { url: targetUrl }),
     ...(data      && { data }),
   };
 
