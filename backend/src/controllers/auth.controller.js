@@ -9,7 +9,7 @@ import {
 } from "../utils/mailer.js";
 import { setAuthCookie, clearAuthCookie } from "../utils/setAuthCookie.js";
 import { REFERRAL_REWARD, TOKEN_EXPIRY_DAYS } from "../config/tokens.js";
-import { sendDailyResetNotification } from "../utils/onesignal.js";
+import { sendDailyResetNotification, sendWelcomeNotification } from "../utils/onesignal.js";
 
 /* ─── Helper ─── */
 function addDays(date, days) {
@@ -125,6 +125,11 @@ export const verifyEmail = async (req, res) => {
         console.error("[verifyEmail] Referral reward failed (non-fatal):", err.message);
       });
     }
+
+    /* ── Welcome push for first-time verified users — non-blocking ── */
+    sendWelcomeNotification(user.email, user.name).catch((err) => {
+      console.error("[verifyEmail] Welcome push failed (non-fatal):", err.message);
+    });
 
     req.logIn(user, (err) => {
       if (err) return res.status(500).json({ error: "Login after verify failed." });
@@ -258,6 +263,12 @@ export const googleCallback = (req, res, next) => {
     req.logIn(user, (loginErr) => {
       if (loginErr) return next(loginErr);
       setAuthCookie(res, user);
+
+      if (user.isNewUser) {
+        sendWelcomeNotification(user.email, user.name).catch((err) => {
+          console.error("[googleCallback] Welcome push failed (non-fatal):", err.message);
+        });
+      }
 
       const isMobile = req.session.intent === "1";
       const appRedirectTo = req.session.redirect_to;

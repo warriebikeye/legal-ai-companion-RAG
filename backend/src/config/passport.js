@@ -36,6 +36,8 @@ passport.use(
             name,
             photo,
           });
+          // Transient flag (not a schema field, not persisted) so the callback knows this is a first-time signup
+          user.isNewUser = true;
         } else {
           // Optional: keep user details updated
           const updates = {};
