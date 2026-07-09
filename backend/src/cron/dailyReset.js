@@ -51,11 +51,10 @@ export async function runDailyReset() {
 }
 
 export function scheduleDailyReset() {
-  // TEMP: every 2 minutes for push notification testing.
-  // Revert to "0 0 * * *" (midnight WAT) once confirmed working.
+  // Runs at midnight WAT.
   // Token expiry cron runs separately at 01:00 WAT — see cron/tokenExpiry.js
-  cron.schedule("*/2 * * * *", runDailyReset, {
+  cron.schedule("0 0 * * *", runDailyReset, {
     timezone: "Africa/Lagos",
   });
-  console.log("[DailyReset] Cron scheduled — runs every 2 minutes (TEMP testing mode).");
+  console.log("[DailyReset] Cron scheduled — runs daily at midnight WAT.");
 }
