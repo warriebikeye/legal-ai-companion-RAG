@@ -98,7 +98,7 @@ export async function sendWelcomeNotification(userEmail, userName) {
   return sendPushNotification({
     externalId: userEmail,
     title:      `Welcome to Clauzify, ${userName?.split(" ")[0] || "there"} 👋`,
-    body:       "Africa's legal intelligence is ready for your first question.",
+    body:       "Africa's legal intelligence is ready for your first question. You have also received 4 tokens to get started. Ask Clauzify anything.",
     targetUrl: "deebees://home",  
     data:       { type: "welcome" },
   });
