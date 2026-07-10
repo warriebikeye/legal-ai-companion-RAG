@@ -97,6 +97,14 @@ const UserSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    lastReferralNudgeAt: {
+      type: Date,
+      default: null,
+    },
+    referralNudgeCount: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );

@@ -91,12 +91,15 @@ export async function sendReferralInvite(req, res) {
   }
 }
 
+const REFERRAL_NUDGE_DAILY_LIMIT = 3;
+
 /* =========================================================
    GET /api/referral/nudge
    Called by the frontend on page load. If the current user
    has no tokens left (wallet + daily free both exhausted),
    returns an in-app notification nudging them to refer a
    friend for free tokens. No push — the app is already open.
+   Capped at REFERRAL_NUDGE_DAILY_LIMIT shows per calendar day.
 ========================================================= */
 export async function getReferralNudge(req, res) {
   try {
@@ -107,6 +110,22 @@ export async function getReferralNudge(req, res) {
     if (!hasNoTokens) {
       return res.json({ success: true, show: false });
     }
+
+    // Reset the counter on a new calendar day, same convention as the
+    // daily free token reset in tokenGate.js.
+    const now       = new Date();
+    const lastShown = req.user.lastReferralNudgeAt;
+    const isNewDay  = !lastShown || now.toDateString() !== new Date(lastShown).toDateString();
+    const todaysCount = isNewDay ? 0 : (req.user.referralNudgeCount || 0);
+
+    if (todaysCount >= REFERRAL_NUDGE_DAILY_LIMIT) {
+      return res.json({ success: true, show: false });
+    }
+
+    await User.updateOne(
+      { _id: req.user._id },
+      { $set: { lastReferralNudgeAt: now, referralNudgeCount: todaysCount + 1 } }
+    );
 
     return res.json({
       success:      true,
