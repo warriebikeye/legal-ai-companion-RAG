@@ -142,10 +142,15 @@ export async function sendReferralNudgePush(userEmail, rewardTokens) {
    is already in the app.
 ========================================================= */
 export function buildReferralNudgeInApp(rewardTokens) {
-  return {
+  console.log(`[OneSignal] → buildReferralNudgeInApp(reward=${rewardTokens})`);
+
+  const message = {
     type:   "referral_nudge",
     title:  "Out of tokens? Get more for free 🎁",
     body:   `Refer a friend or relative to Clauzify and earn ${rewardTokens} free tokens when they join.`,
     rewardTokens,
   };
+
+  console.log(`[OneSignal] built in-app message:`, JSON.stringify(message));
+  return message;
 }

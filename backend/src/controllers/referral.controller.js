@@ -102,12 +102,20 @@ const REFERRAL_NUDGE_DAILY_LIMIT = 3;
    Capped at REFERRAL_NUDGE_DAILY_LIMIT shows per calendar day.
 ========================================================= */
 export async function getReferralNudge(req, res) {
+  console.log(`[ReferralNudge] ── GET /api/referral/nudge ──────────────────`);
+  console.log(`[ReferralNudge] userId          : ${req.user._id}`);
+  console.log(`[ReferralNudge] email           : ${req.user.email}`);
   try {
     // req.user is already fully hydrated from the DB by requireAuth
     // (passport deserializeUser / JWT fallback), so no extra lookup needed.
+    console.log(`[ReferralNudge] wallet          : ${req.user.wallet}`);
+    console.log(`[ReferralNudge] dailyFreeTokens : ${req.user.dailyFreeTokens}`);
+
     const hasNoTokens = req.user.wallet <= 0 && req.user.dailyFreeTokens <= 0;
+    console.log(`[ReferralNudge] hasNoTokens     : ${hasNoTokens}`);
 
     if (!hasNoTokens) {
+      console.log(`[ReferralNudge] → user still has tokens, not showing. show=false`);
       return res.json({ success: true, show: false });
     }
 
@@ -118,7 +126,12 @@ export async function getReferralNudge(req, res) {
     const isNewDay  = !lastShown || now.toDateString() !== new Date(lastShown).toDateString();
     const todaysCount = isNewDay ? 0 : (req.user.referralNudgeCount || 0);
 
+    console.log(`[ReferralNudge] lastShownAt     : ${lastShown ?? "never"}`);
+    console.log(`[ReferralNudge] isNewDay        : ${isNewDay}`);
+    console.log(`[ReferralNudge] todaysCount     : ${todaysCount} / ${REFERRAL_NUDGE_DAILY_LIMIT}`);
+
     if (todaysCount >= REFERRAL_NUDGE_DAILY_LIMIT) {
+      console.log(`[ReferralNudge] → daily limit reached, not showing. show=false`);
       return res.json({ success: true, show: false });
     }
 
@@ -126,14 +139,19 @@ export async function getReferralNudge(req, res) {
       { _id: req.user._id },
       { $set: { lastReferralNudgeAt: now, referralNudgeCount: todaysCount + 1 } }
     );
+    console.log(`[ReferralNudge] → counter updated to ${todaysCount + 1}, building in-app notification`);
+
+    const notification = buildReferralNudgeInApp(REFERRAL_REWARD);
+    console.log(`[ReferralNudge] notification    :`, JSON.stringify(notification));
+    console.log(`[ReferralNudge] → show=true, sending response`);
 
     return res.json({
       success:      true,
       show:         true,
-      notification: buildReferralNudgeInApp(REFERRAL_REWARD),
+      notification,
     });
   } catch (err) {
-    console.error("[getReferralNudge]", err.message);
+    console.error("[ReferralNudge] ❌ error:", err.message, err.stack);
     return res.status(500).json({ success: false, message: "Failed to check referral nudge" });
   }
 }
