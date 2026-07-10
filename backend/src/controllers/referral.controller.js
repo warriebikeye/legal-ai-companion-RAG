@@ -91,12 +91,12 @@ export async function sendReferralInvite(req, res) {
   }
 }
 
-const REFERRAL_NUDGE_DAILY_LIMIT = 3;
+const REFERRAL_NUDGE_DAILY_LIMIT = 5;
 
 /* =========================================================
    GET /api/referral/nudge
-   Called by the frontend on page load. If the current user
-   has no tokens left (wallet + daily free both exhausted),
+   Called by the frontend on page load. If the current user's
+   purchased wallet is empty (dailyFreeTokens don't count),
    returns an in-app notification nudging them to refer a
    friend for free tokens. No push — the app is already open.
    Capped at REFERRAL_NUDGE_DAILY_LIMIT shows per calendar day.
@@ -108,14 +108,14 @@ export async function getReferralNudge(req, res) {
   try {
     // req.user is already fully hydrated from the DB by requireAuth
     // (passport deserializeUser / JWT fallback), so no extra lookup needed.
+    // dailyFreeTokens is irrelevant here — only the purchased wallet matters.
     console.log(`[ReferralNudge] wallet          : ${req.user.wallet}`);
-    console.log(`[ReferralNudge] dailyFreeTokens : ${req.user.dailyFreeTokens}`);
 
-    const hasNoTokens = req.user.wallet <= 0 && req.user.dailyFreeTokens <= 0;
+    const hasNoTokens = req.user.wallet <= 0;
     console.log(`[ReferralNudge] hasNoTokens     : ${hasNoTokens}`);
 
     if (!hasNoTokens) {
-      console.log(`[ReferralNudge] → user still has tokens, not showing. show=false`);
+      console.log(`[ReferralNudge] → wallet still has tokens, not showing. show=false`);
       return res.json({ success: true, show: false });
     }
 
