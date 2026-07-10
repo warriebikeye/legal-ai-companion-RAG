@@ -2,6 +2,8 @@
 import User from "../models/User.js";
 import Transaction from "../models/Transaction.js";
 import { sendReferralInviteEmail } from "../utils/mailer.js";
+import { buildReferralNudgeInApp } from "../utils/onesignal.js";
+import { REFERRAL_REWARD } from "../config/tokens.js";
 
 /* =========================================================
    GET /api/referral/info
@@ -86,5 +88,33 @@ export async function sendReferralInvite(req, res) {
   } catch (err) {
     console.error("[sendReferralInvite]", err.message);
     return res.status(500).json({ success: false, message: "Failed to send invite" });
+  }
+}
+
+/* =========================================================
+   GET /api/referral/nudge
+   Called by the frontend on page load. If the current user
+   has no tokens left (wallet + daily free both exhausted),
+   returns an in-app notification nudging them to refer a
+   friend for free tokens. No push — the app is already open.
+========================================================= */
+export async function getReferralNudge(req, res) {
+  try {
+    // req.user is already fully hydrated from the DB by requireAuth
+    // (passport deserializeUser / JWT fallback), so no extra lookup needed.
+    const hasNoTokens = req.user.wallet <= 0 && req.user.dailyFreeTokens <= 0;
+
+    if (!hasNoTokens) {
+      return res.json({ success: true, show: false });
+    }
+
+    return res.json({
+      success:      true,
+      show:         true,
+      notification: buildReferralNudgeInApp(REFERRAL_REWARD),
+    });
+  } catch (err) {
+    console.error("[getReferralNudge]", err.message);
+    return res.status(500).json({ success: false, message: "Failed to check referral nudge" });
   }
 }

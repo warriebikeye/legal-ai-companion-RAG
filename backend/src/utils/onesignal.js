@@ -83,7 +83,7 @@ export async function sendDailyResetNotification(userEmail) {
   console.log(`[OneSignal] → sendDailyResetNotification(${userEmail})`);
   return sendPushNotification({
     externalId: userEmail,
-    title:      "Your queries have reset 🔄",
+    title:      "You just received your 4 daily tokens !!! 🔄",
     body:       "Your daily legal queries are ready. Ask Clauzify anything.",
     //targetUrl: "deebees://home",
     data:       { type: "daily_reset" },
@@ -115,4 +115,37 @@ export async function sendTokenExpiryWarningPush(userEmail, tokens, daysLeft) {
     body:       "Use your tokens before they expire — ask a legal question or review a contract now.",
     data:       { type: "token_expiry_warning", tokens, daysLeft },
   });
+}
+
+/* =========================================================
+   REFERRAL NUDGE — PUSH (device push, unused for now but
+   kept available for a future cron/bulk-broadcast use case)
+   Sent to users with an empty wallet, prompting them to
+   refer a friend for free tokens instead of buying more.
+========================================================= */
+export async function sendReferralNudgePush(userEmail, rewardTokens) {
+  console.log(`[OneSignal] → sendReferralNudgePush(${userEmail}, reward=${rewardTokens})`);
+  return sendPushNotification({
+    externalId: userEmail,
+    title:      "Out of tokens? Get more for free 🎁",
+    body:       `Refer a friend or relative to Clauzify and earn ${rewardTokens} free tokens when they join.`,
+    data:       { type: "referral_nudge", rewardTokens },
+  });
+}
+
+/* =========================================================
+   REFERRAL NUDGE — IN-APP
+   No network call — the frontend calls this on page load
+   (e.g. GET /api/referral/nudge) for the *current* user, so
+   there's nothing to "send"; we just build the message the
+   frontend renders as an in-app banner/toast while the user
+   is already in the app.
+========================================================= */
+export function buildReferralNudgeInApp(rewardTokens) {
+  return {
+    type:   "referral_nudge",
+    title:  "Out of tokens? Get more for free 🎁",
+    body:   `Refer a friend or relative to Clauzify and earn ${rewardTokens} free tokens when they join.`,
+    rewardTokens,
+  };
 }
