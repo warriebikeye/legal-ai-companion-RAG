@@ -43,7 +43,7 @@ export async function sendVerificationEmail(toEmail, token) {
 /* =========================================================
    REFERRAL REWARD EMAIL
 ========================================================= */
-export async function sendReferralRewardEmail(toEmail, toName, tokens, isReferrer) {
+export async function sendReferralRewardEmail(toEmail, firstname, tokens, isReferrer) {
   try {
     const resend   = getResend();
     const subject  = isReferrer
@@ -89,18 +89,18 @@ export async function sendReferralRewardEmail(toEmail, toName, tokens, isReferre
 /* =========================================================
    REFERRAL INVITE EMAIL
 ========================================================= */
-export async function sendReferralInviteEmail(toEmail, referrerName, referralLink) {
+export async function sendReferralInviteEmail(toEmail, referrerFirstname, referralLink) {
   try {
     const resend = getResend();
     const { data, error } = await resend.emails.send({
       from: `CLAUZIFY <${process.env.EMAIL_FROM}>`,
       to:   [toEmail],
-      subject: `${referrerName || "Someone"} invited you to Clauzify`,
+      subject: `${referrerFirstname || "Someone"} invited you to Clauzify`,
       html: `
         <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px 24px;background:#0f0f0f;color:#f0f0f0;border-radius:12px">
           <h2 style="color:#c8a94a;margin:0 0 12px">You've been invited to Clauzify</h2>
           <p style="color:#ccc;line-height:1.6">
-            <strong>${referrerName || "A friend"}</strong> thinks you'd find Clauzify useful —
+            <strong>${referrerFirstname || "A friend"}</strong> thinks you'd find Clauzify useful —
             Africa's legal intelligence engine for reviewing contracts and getting instant legal answers.
           </p>
           <div style="margin:24px 0;padding:16px;background:rgba(200,169,74,0.1);border:1px solid rgba(200,169,74,0.3);border-radius:8px;text-align:center">
@@ -127,10 +127,10 @@ export async function sendReferralInviteEmail(toEmail, referrerName, referralLin
 /* =========================================================
    TOKEN EXPIRY WARNING EMAIL
 ========================================================= */
-export async function sendTokenExpiryWarningEmail(toEmail, toName, tokens, daysLeft) {
+export async function sendTokenExpiryWarningEmail(toEmail, firstname, tokens, daysLeft) {
   try {
     const resend    = getResend();
-    const firstName = toName?.split(" ")[0] || "there";
+    const firstName = firstname || "there";
 
     const { data, error } = await resend.emails.send({
       from: `CLAUZIFY <${process.env.EMAIL_FROM}>`,

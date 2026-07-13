@@ -79,11 +79,11 @@ export async function sendPushNotification({ externalId, title, body, targetUrl,
 /* =========================================================
    DAILY RESET NOTIFICATION
 ========================================================= */
-export async function sendDailyResetNotification(userEmail) {
+export async function sendDailyResetNotification(userEmail, firstname) {
   console.log(`[OneSignal] → sendDailyResetNotification(${userEmail})`);
   return sendPushNotification({
     externalId: userEmail,
-    title:      "You just received your 4 daily tokens !!! 🔄",
+    title:      `Hi ${firstname || "there"}, your 4 daily tokens just landed! 🔄`,
     body:       "Your daily legal queries are ready. Ask Clauzify anything.",
     //targetUrl: "deebees://home",
     data:       { type: "daily_reset" },
@@ -93,11 +93,11 @@ export async function sendDailyResetNotification(userEmail) {
 /* =========================================================
    WELCOME NOTIFICATION
 ========================================================= */
-export async function sendWelcomeNotification(userEmail, userName) {
+export async function sendWelcomeNotification(userEmail, firstname) {
   console.log(`[OneSignal] → sendWelcomeNotification(${userEmail})`);
   return sendPushNotification({
     externalId: userEmail,
-    title:      `Welcome to Clauzify, ${userName?.split(" ")[0] || "there"} 👋`,
+    title:      `Welcome to Clauzify, ${firstname || "there"} 👋`,
     body:       "Africa's legal intelligence is ready for your first question. You have also received 4 tokens to get started. Ask Clauzify anything.",
    // targetUrl: "deebees://home",  
     data:       { type: "welcome" },
@@ -107,11 +107,11 @@ export async function sendWelcomeNotification(userEmail, userName) {
 /* =========================================================
    TOKEN EXPIRY WARNING NOTIFICATION
 ========================================================= */
-export async function sendTokenExpiryWarningPush(userEmail, tokens, daysLeft) {
+export async function sendTokenExpiryWarningPush(userEmail, firstname, tokens, daysLeft) {
   console.log(`[OneSignal] → sendTokenExpiryWarningPush(${userEmail}, tokens=${tokens}, daysLeft=${daysLeft})`);
   return sendPushNotification({
     externalId: userEmail,
-    title:      `⏳ ${tokens} tokens expiring in ${daysLeft} day${daysLeft > 1 ? "s" : ""}`,
+    title:      `⏳ Hi ${firstname || "there"}, ${tokens} tokens expiring in ${daysLeft} day${daysLeft > 1 ? "s" : ""}`,
     body:       "Use your tokens before they expire — ask a legal question or review a contract now.",
     data:       { type: "token_expiry_warning", tokens, daysLeft },
   });
@@ -123,11 +123,11 @@ export async function sendTokenExpiryWarningPush(userEmail, tokens, daysLeft) {
    Sent to users with an empty wallet, prompting them to
    refer a friend for free tokens instead of buying more.
 ========================================================= */
-export async function sendReferralNudgePush(userEmail, rewardTokens) {
+export async function sendReferralNudgePush(userEmail, firstname, rewardTokens) {
   console.log(`[OneSignal] → sendReferralNudgePush(${userEmail}, reward=${rewardTokens})`);
   return sendPushNotification({
     externalId: userEmail,
-    title:      "Out of tokens? Get more for free 🎁",
+    title:      `Hi ${firstname || "there"}, out of tokens? Get more for free 🎁`,
     body:       `Refer a friend or relative to Clauzify and earn ${rewardTokens} free tokens when they join.`,
     data:       { type: "referral_nudge", rewardTokens },
   });
@@ -141,12 +141,12 @@ export async function sendReferralNudgePush(userEmail, rewardTokens) {
    frontend renders as an in-app banner/toast while the user
    is already in the app.
 ========================================================= */
-export function buildReferralNudgeInApp(rewardTokens) {
+export function buildReferralNudgeInApp(firstname, rewardTokens) {
   console.log(`[OneSignal] → buildReferralNudgeInApp(reward=${rewardTokens})`);
 
   const message = {
     type:   "referral_nudge",
-    title:  "Out of tokens? Get more for free 🎁",
+    title:  `Hi ${firstname || "there"}, out of tokens? Get more for free 🎁`,
     body:   `Refer a friend or relative to Clauzify and earn ${rewardTokens} free tokens when they join.`,
     rewardTokens,
   };

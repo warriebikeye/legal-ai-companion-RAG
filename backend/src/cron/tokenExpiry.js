@@ -123,7 +123,7 @@ async function sendExpiryWarnings() {
       status:    "success",
       expiresAt: { $gt: now, $lte: warningDate },
       warned:    { $ne: true },
-    }).populate("user", "email name wallet");
+    }).populate("user", "email name firstname wallet");
 
     console.log(
       `[TokenExpiry] Found ${soonExpiring.length} batch(es) expiring within ${EXPIRY_WARNING_DAYS} days.`
@@ -149,10 +149,10 @@ async function sendExpiryWarnings() {
         );
 
         // Fire push + email — both non-blocking
-        sendTokenExpiryWarningPush(user.email, batch.tokens, daysLeft)
+        sendTokenExpiryWarningPush(user.email, user.firstname || user.name, batch.tokens, daysLeft)
           .catch(() => {});
 
-        sendTokenExpiryWarningEmail(user.email, user.name, batch.tokens, daysLeft)
+        sendTokenExpiryWarningEmail(user.email, user.firstname || user.name, batch.tokens, daysLeft)
           .catch(() => {});
 
         warnedUsers.add(user._id.toString());

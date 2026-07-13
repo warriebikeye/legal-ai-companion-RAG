@@ -17,7 +17,7 @@ const THIRTY_DAYS_S = 30 * 24 * 60 * 60;
  * 2. `ub_ui`    — Secure + SameSite=Strict (NOT HttpOnly)
  *    Same signed JWT but JS-readable so the frontend can
  *    decode the payload without a fetch. Contains only safe
- *    UI data: name, email, photo, subscriptionTier.
+ *    UI data: firstname, lastname, email, photo, subscriptionTier.
  *    An attacker who steals this via XSS gets no session
  *    power — the real session lives in `ub_sess` + connect.sid.
  */
@@ -32,7 +32,8 @@ export function setAuthCookie(res, user) {
 
   const payload = {
     id: user._id?.toString() ?? user.id?.toString(),
-    name: user.name ?? "",
+    firstname: user.firstname || user.name || "",
+    lastname: user.lastname ?? "",
     email: user.email ?? "",
     photo: user.photo ?? "",
     subscriptionTier: user.subscriptionTier ?? "free",

@@ -12,7 +12,7 @@ export async function runDailyReset() {
     // Reset all verified users, regardless of whether they used their free tokens today
     const usersToReset = await User.find({
       isVerified: true,
-    }).select("email name dailyFreeTokens");
+    }).select("email name firstname dailyFreeTokens");
 
     console.log(`[DailyReset] Found ${usersToReset.length} users to reset.`);
 
@@ -32,7 +32,7 @@ export async function runDailyReset() {
         );
         resetCount++;
 
-        const pushResult = await sendDailyResetNotification(user.email);
+        const pushResult = await sendDailyResetNotification(user.email, user.firstname || user.name);
         if (pushResult) notifyCount++;
 
       } catch (userErr) {

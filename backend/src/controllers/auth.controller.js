@@ -23,7 +23,7 @@ function addDays(date, days) {
    Accepts optional referralCode from body or ?ref= query
 ========================================================= */
 export const register = async (req, res) => {
-  const { email, password, name } = req.body;
+  const { email, password, firstname, lastname } = req.body;
 
   // Read referral code from body or query string
   const referralCode = (
@@ -32,7 +32,7 @@ export const register = async (req, res) => {
     ""
   ).toUpperCase().trim();
 
-  if (!email || !password || !name) {
+  if (!email || !password || !firstname) {
     return res.status(400).json({ error: "All fields are required." });
   }
 
@@ -60,7 +60,8 @@ export const register = async (req, res) => {
 
     if (existing && !existing.isVerified) {
       existing.password = hashed;
-      existing.name = name;
+      existing.firstname = firstname;
+      existing.lastname = lastname || "";
       existing.verifyToken = token;
       existing.verifyTokenExpiry = expiry;
       // Update referredBy if not already set
@@ -71,7 +72,8 @@ export const register = async (req, res) => {
     } else {
       await User.create({
         email,
-        name,
+        firstname,
+        lastname: lastname || "",
         password: hashed,
         isVerified: false,
         verifyToken: token,
@@ -127,7 +129,7 @@ export const verifyEmail = async (req, res) => {
     }
 
     /* ── Welcome push for first-time verified users — non-blocking ── */
-    sendWelcomeNotification(user.email, user.name).catch((err) => {
+    sendWelcomeNotification(user.email, user.firstname || user.name).catch((err) => {
       console.error("[verifyEmail] Welcome push failed (non-fatal):", err.message);
     });
 
@@ -203,8 +205,8 @@ async function creditReferralReward(referee) {
   console.log(`[referral] Credited ${REFERRAL_REWARD} tokens to referrer: ${referrer.email}`);
 
   /* ── Email both parties — non-blocking ── */
-  sendReferralRewardEmail(referee.email, referee.name, REFERRAL_REWARD, false).catch(() => { });
-  sendReferralRewardEmail(referrer.email, referrer.name, REFERRAL_REWARD, true).catch(() => { });
+  sendReferralRewardEmail(referee.email, referee.firstname || referee.name, REFERRAL_REWARD, false).catch(() => { });
+  sendReferralRewardEmail(referrer.email, referrer.firstname || referrer.name, REFERRAL_REWARD, true).catch(() => { });
 }
 
 /* =========================================================
@@ -265,7 +267,7 @@ export const googleCallback = (req, res, next) => {
       setAuthCookie(res, user);
 
       if (user.isNewUser) {
-        sendWelcomeNotification(user.email, user.name).catch((err) => {
+        sendWelcomeNotification(user.email, user.firstname || user.name).catch((err) => {
           console.error("[googleCallback] Welcome push failed (non-fatal):", err.message);
         });
       }
@@ -305,6 +307,8 @@ export function me(req, res) {
     userEmail: req.user.email,
     userImage: req.user.photo,
     name: req.user.name,
+    firstname: req.user.firstname,
+    lastname: req.user.lastname,
     subscriptionTier: req.user.subscriptionTier,
     subscriptionStatus: req.user.subscriptionStatus,
     subscriptionPlan: req.user.subscriptionPlan,

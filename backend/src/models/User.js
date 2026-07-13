@@ -21,6 +21,8 @@ const UserSchema = new mongoose.Schema(
     verifyToken: { type: String },
     verifyTokenExpiry: { type: Date },
     name: { type: String, default: "" },
+    firstname: { type: String, default: "" },
+    lastname: { type: String, default: "" },
     photo: { type: String, default: "" },
 
     /* =========================================
@@ -119,7 +121,12 @@ UserSchema.pre("save", function (next) {
       .toString("hex")
       .toUpperCase();
   }
-  
+
+  if (this.isModified("firstname") || this.isModified("lastname")) {
+    this.name = [this.firstname, this.lastname].filter(Boolean).join(" ").trim() || this.name;
+  }
+
+  next();
 });
 
 export default mongoose.model("User", UserSchema);

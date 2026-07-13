@@ -12,7 +12,7 @@ import { REFERRAL_REWARD } from "../config/tokens.js";
 export async function getReferralInfo(req, res) {
   try {
     const user = await User.findById(req.user._id)
-      .select("referralCode referralCount wallet name");
+      .select("referralCode referralCount wallet name firstname");
 
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
@@ -76,12 +76,12 @@ export async function sendReferralInvite(req, res) {
     }
 
     const user = await User.findById(req.user._id)
-      .select("referralCode name");
+      .select("referralCode name firstname");
 
     const baseUrl      = process.env.CLIENT_URL_PROD || process.env.CLIENT_URL_TEST;
     const referralLink = `${baseUrl}/signup?ref=${user.referralCode}`;
 
-    await sendReferralInviteEmail(friendEmail, user.name, referralLink);
+    await sendReferralInviteEmail(friendEmail, user.firstname || user.name, referralLink);
 
     return res.json({ success: true, message: `Invite sent to ${friendEmail}` });
 
@@ -141,7 +141,7 @@ export async function getReferralNudge(req, res) {
     );
     console.log(`[ReferralNudge] → counter updated to ${todaysCount + 1}, building in-app notification`);
 
-    const notification = buildReferralNudgeInApp(REFERRAL_REWARD);
+    const notification = buildReferralNudgeInApp(req.user.firstname || req.user.name, REFERRAL_REWARD);
     console.log(`[ReferralNudge] notification    :`, JSON.stringify(notification));
     console.log(`[ReferralNudge] → show=true, sending response`);
 

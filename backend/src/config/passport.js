@@ -23,7 +23,10 @@ passport.use(
         // ✅ Pull useful fields from Google
         const googleId = profile.id;
         const email = profile.emails?.[0]?.value || "";
-        const name = profile.displayName || "";
+        const displayName = profile.displayName || "";
+        const firstname = profile.name?.givenName || displayName.split(" ")[0] || "";
+        const lastname = profile.name?.familyName || displayName.split(" ").slice(1).join(" ") || "";
+        const name = displayName || [firstname, lastname].filter(Boolean).join(" ");
         const photo = profile.photos?.[0]?.value || "";
 
         // ✅ Find or create user in MongoDB
@@ -34,6 +37,8 @@ passport.use(
             googleId,
             email,
             name,
+            firstname,
+            lastname,
             photo,
           });
           // Transient flag (not a schema field, not persisted) so the callback knows this is a first-time signup
@@ -43,6 +48,8 @@ passport.use(
           const updates = {};
           if (email && user.email !== email) updates.email = email;
           if (name && user.name !== name) updates.name = name;
+          if (firstname && user.firstname !== firstname) updates.firstname = firstname;
+          if (lastname && user.lastname !== lastname) updates.lastname = lastname;
           if (photo && user.photo !== photo) updates.photo = photo;
 
           if (Object.keys(updates).length) {
