@@ -126,7 +126,7 @@ UserSchema.pre("save", function (next) {
     this.name = [this.firstname, this.lastname].filter(Boolean).join(" ").trim() || this.name;
   }
 
-  next();
+ // next();
 });
 
 export default mongoose.model("User", UserSchema);
