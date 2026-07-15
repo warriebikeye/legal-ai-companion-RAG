@@ -21,6 +21,7 @@ import User from "../models/User.js";
 import { retrieveDocumentContext } from "./documentRetriever.service.js";
 import { getCachedQueryEmbedding } from "./queryEmbeddingCache.service.js";
 import { generateQueryCacheKey } from "../utils/queryCache.js";
+import { detectJurisdictions } from "./jurisdiction.service.js";
 import {
   determineTaskType,
   getContextLimits,
@@ -134,11 +135,27 @@ async function buildRAGContext(query, country, extraContext = "", options = {}) 
     ? extraContext.slice(0, contextLimits.maxExtraContextLength)
     : extraContext;
 
+  // ── Jurisdiction detection ────────────────────────────────
+  // Decides, from the query text alone, whether this is a single- or
+  // multi-jurisdiction question — regardless of the dropdown-selected
+  // `country`. 0/1 mentions behave exactly like before (single collection).
+  const jurisdiction = detectJurisdictions(query, country);
+  const isMulti = jurisdiction.mode === "multi";
+  const jurisdictionCountries = jurisdiction.countries;
+  const perCountryTopK = isMulti
+    ? Math.max(5, Math.floor(contextLimits.topKResults / jurisdictionCountries.length))
+    : contextLimits.topKResults;
+
+  log("Jurisdiction resolved", {
+    mode: jurisdiction.mode,
+    countries: jurisdictionCountries.map((c) => c.name),
+  });
+
   // ── Embeddings + parallel retrieval ──────────────────────
   const embedding = await getCachedQueryEmbedding(query);
   log("Embedding generated");
 
-  const [documentResult, legalResults] = await Promise.all([
+  const [documentResult, legalResultsByCountry] = await Promise.all([
     conversationId
       ? retrieveDocumentContext({
           queryEmbedding: embedding,
@@ -148,17 +165,27 @@ async function buildRAGContext(query, country, extraContext = "", options = {}) 
         })
       : Promise.resolve({ chunks: [], mode: "none" }),
 
-    qdrant.search(`legal_chunks_${country.toLowerCase()}-gm`, {
-      vector: embedding,
-      top: contextLimits.topKResults,
-      with_payload: true,
-    }),
+    Promise.all(
+      jurisdictionCountries.map((c) =>
+        qdrant
+          .search(`legal_chunks_${c.slug}-gm`, {
+            vector: embedding,
+            top: perCountryTopK,
+            with_payload: true,
+          })
+          .then((results) => ({ countryName: c.name, results }))
+      )
+    ),
   ]);
+
+  const legalResults = legalResultsByCountry.flatMap(({ countryName, results }) =>
+    results.map((r) => ({ ...r, countryName }))
+  );
 
   log("Retrieval complete", {
     documentChunks: documentResult.chunks.length,
     legalResults: legalResults.length,
-    topK: contextLimits.topKResults,
+    perCountryTopK,
   });
 
   // ── Assemble context strings ──────────────────────────────
@@ -182,7 +209,10 @@ async function buildRAGContext(query, country, extraContext = "", options = {}) 
 
   const legalContext = legalChunks
     .map((r) => {
-      const src = r.payload?.source ? `[Source: ${r.payload.source}]` : "";
+      // In multi-jurisdiction mode, tag each chunk with its country of
+      // origin so the model can attribute citations to the right one.
+      const countryTag = isMulti && r.countryName ? ` — ${r.countryName}` : "";
+      const src = r.payload?.source ? `[Source: ${r.payload.source}${countryTag}]` : "";
       // Use full chunk text — truncating here causes mid-sentence quote cutoffs
       // (e.g. a numbered list item like "(4) a father" gets cut before completion).
       // Context window is managed upstream via topK and hasLargeContext routing.
@@ -218,9 +248,7 @@ async function buildRAGContext(query, country, extraContext = "", options = {}) 
   log("Model resolved", { resolvedModel, hasLargeContext, promptLength: promptForSizing.length });
 
   // ── Build system prompt ───────────────────────────────────
-  const systemPrompt = `You are a legal AI assistant specializing in ${country} law.
-
-Rules:
+  const rulesBlock = `Rules:
 - Use ONLY the provided context. Do not invent legal facts.
 - Be precise, clear, and accessible to a layperson.
 - When citing a source, use the filename from the [Source: filename] tag but ALWAYS remove the file extension — never include ".pdf", ".docx", or any extension in your response.
@@ -229,6 +257,16 @@ Rules:
 - Present quoted contexts as bullet lists.
 - If conversation history is provided, treat the latest message as a follow-up.
 - End every response with: "_Disclaimer: This is not legal advice. Please consult a qualified lawyer._"`;
+
+  const systemPrompt = isMulti
+    ? `You are a legal AI assistant specializing in comparative law across ${jurisdictionCountries.map((c) => c.name).join(", ")}.
+
+Structure your answer with one clearly labeled section per jurisdiction (use "## <Country Name>" as the heading), followed by a brief "## Key Differences" section comparing them. Source tags in the context are marked with the jurisdiction they belong to (e.g. "[Source: filename — Nigeria]") — only cite a source under the jurisdiction section it's tagged with.
+
+${rulesBlock}`
+    : `You are a legal AI assistant specializing in ${jurisdictionCountries[0].name} law.
+
+${rulesBlock}`;
 
   const prompt = buildPrompt({
     systemPrompt,
@@ -273,7 +311,11 @@ export async function getRAGAnswer(query, country, extraContext = "", options = 
     }
 
     const isConversational = Boolean(historyText.trim());
-    const cacheKey = generateQueryCacheKey({ query, conversationId, country, retrievalMode });
+    // Resolve jurisdictions for the cache key (not just the raw dropdown
+    // value) so the same comparative question caches consistently
+    // regardless of which country happens to be selected in the UI.
+    const resolvedCountries = detectJurisdictions(query, country).countries.map((c) => c.name).join("+");
+    const cacheKey = generateQueryCacheKey({ query, conversationId, country: resolvedCountries, retrievalMode });
 
     if (!isConversational) {
       const cached = await redis.get(cacheKey);
