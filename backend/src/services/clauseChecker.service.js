@@ -21,17 +21,52 @@ function log(step, data = null) {
 
 /* =========================================================
    SAFE TEXT TRIM
+
+   Raised from 4000 → 25000 chars so the health score reflects
+   the whole document (a few dozen pages) rather than just the
+   first ~page. `truncated` tells the caller (and eventually the
+   UI) when a document exceeded this and was cut short.
 ========================================================= */
+
+const MAX_ANALYSIS_CHARS = 25000;
 
 function trimText(
   text = "",
-  max = 4000
+  max = MAX_ANALYSIS_CHARS
 ) {
-  if (!text) return "";
+  if (!text) return { text: "", truncated: false };
 
   return text.length > max
-    ? text.slice(0, max)
-    : text;
+    ? { text: text.slice(0, max), truncated: true }
+    : { text, truncated: false };
+}
+
+/* =========================================================
+   HEALTH SCORE
+
+   Computed deterministically from the classified issue counts
+   rather than asked of the LLM directly — keeps the number
+   auditable/consistent instead of an invented figure.
+========================================================= */
+
+function computeHealthScore({ needsAttention, highRisk, missingMandatory }) {
+  const score =
+    100 -
+    needsAttention * 3 -
+    highRisk * 10 -
+    missingMandatory * 15;
+
+  return Math.max(0, Math.min(100, score));
+}
+
+function computeRecommendation(healthScore) {
+  if (healthScore >= 85) {
+    return "Looks good — minor review recommended.";
+  }
+  if (healthScore >= 60) {
+    return "Review before signing.";
+  }
+  return "Do not sign without legal review — significant risks identified.";
 }
 
 /* =========================================================
@@ -55,42 +90,49 @@ export class ClauseCheckerService {
         }
       );
 
+      const { text: trimmed, truncated } = trimText(text);
+
       const prompt = `
-You are a legal compliance assistant.
+You are a legal compliance assistant reviewing an entire contract/document for the jurisdiction below.
 
-Analyze this legal document section carefully.
+Review the WHOLE document holistically — do not stop at the first issue you find. For every clause that matters (obligations, termination, payment, liability, confidentiality, dispute resolution, etc.), classify it into exactly one status:
+- "compliant": the clause is standard and legally sound
+- "needs_attention": the clause is unclear, unfair, or potentially problematic but not illegal
+- "high_risk": the clause is illegal, unenforceable, or exposes a party to serious liability
 
-Tasks:
-1. Detect illegal clauses
-2. Detect risky clauses
-3. Detect unenforceable terms
-4. Detect suspicious obligations
-5. Detect missing protections
-6. Explain issues clearly
+Also identify clauses that are MANDATORY for this type of document under the jurisdiction's law but are MISSING from the document entirely — list these with status "missing".
 
 Country:
 ${country.toUpperCase()}
 
-Return STRICT JSON ONLY:
+For every "needs_attention", "high_risk", and "missing" item, provide:
+- "clause": short clause name/title (e.g. "Termination")
+- "clauseText": the exact verbatim text of the clause as it appears in the document (empty string "" if the clause is "missing" since there's nothing to quote)
+- "businessImpact": one or two sentences on the concrete business/legal consequence
+- "legalBasis": a FULL statutory citation — section/article number, the act's full name, chapter/cap number if applicable, and "Laws of the Federation of Nigeria <year>" (or the equivalent full citation form for the given country). Do not return a bare act name alone — legal professionals need the complete citation to trust it.
+- "suggestedRevision": replacement clause text (or, for "missing" items, the clause text to add) that resolves the issue
+
+Also return "compliantCount": the total number of clauses you classified as "compliant" (do not list them individually, just the count).
+
+Return STRICT JSON ONLY, matching exactly this shape:
 
 {
-  "summary": "short section summary",
-
+  "summary": "short overall document summary",
+  "compliantCount": 14,
   "issues": [
     {
-      "type": "illegal|risky|warning",
-
-      "clause": "exact problematic clause",
-
-      "reason": "why this is problematic",
-
-      "recommendation": "how to fix it"
+      "clause": "...",
+      "status": "needs_attention|high_risk|missing",
+      "clauseText": "...",
+      "businessImpact": "...",
+      "legalBasis": "...",
+      "suggestedRevision": "..."
     }
   ]
 }
 
-DOCUMENT SECTION:
-${trimText(text)}
+DOCUMENT:
+${trimmed}
 `;
 
       log(
@@ -130,17 +172,37 @@ ${trimText(text)}
           summary:
             "Failed to parse analysis.",
 
+          compliantCount: 0,
+
           issues: [],
         };
       }
 
+      const rawIssues = parsed.issues || [];
+
+      const needsAttention = rawIssues.filter((i) => i.status === "needs_attention").length;
+      const highRisk = rawIssues.filter((i) => i.status === "high_risk").length;
+      const missingMandatory = rawIssues.filter((i) => i.status === "missing").length;
+      const compliant = parsed.compliantCount || 0;
+
+      const issues = rawIssues.map((i) => ({
+        clause: i.clause || "",
+        status: i.status || "needs_attention",
+        risk: i.status === "high_risk" ? "high" : i.status === "missing" ? "high" : "medium",
+        clauseText: i.clauseText || "",
+        businessImpact: i.businessImpact || "",
+        legalBasis: i.legalBasis || "",
+        suggestedRevision: i.suggestedRevision || "",
+      }));
+
+      const healthScore = computeHealthScore({ needsAttention, highRisk, missingMandatory });
+      const overallRecommendation = computeRecommendation(healthScore);
+
       log(
         "CLAUSE CHECK COMPLETED",
         {
-          issuesFound:
-            parsed?.issues
-              ?.length || 0,
-
+          issuesFound: issues.length,
+          healthScore,
           durationMs:
             Date.now() - started,
         }
@@ -150,8 +212,17 @@ ${trimText(text)}
         summary:
           parsed.summary || "",
 
-        issues:
-          parsed.issues || [],
+        healthScore,
+        truncated,
+        overallRecommendation,
+        scoreBreakdown: {
+          compliant,
+          needsAttention,
+          highRisk,
+          missingMandatory,
+        },
+
+        issues,
       };
     } catch (err) {
       console.error(
@@ -165,6 +236,11 @@ ${trimText(text)}
       return {
         summary:
           "Clause analysis failed.",
+
+        healthScore: null,
+        truncated: false,
+        overallRecommendation: null,
+        scoreBreakdown: null,
 
         issues: [],
       };

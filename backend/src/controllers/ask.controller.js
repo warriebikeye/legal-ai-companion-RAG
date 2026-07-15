@@ -186,6 +186,7 @@ export async function handleTextQuery(req, res) {
       answer: ragResponse.answer,
       sources: ragResponse.sources || [],
       clauseAnalysis: clauseAnalysis ?? null,
+      documentText: extractedText || null,
       documentMode: ragResponse.documentMode || null,
       conversationId: convo._id.toString(),
       modelUsed: ragResponse.modelUsed || null,
@@ -366,7 +367,11 @@ export async function handleTextQueryStream(req, res) {
     for await (const event of ragStream) {
       if (event.type === "meta") {
         metaPayload = event.payload;
-        send("meta", event.payload);
+        send("meta", {
+          ...event.payload,
+          documentText: extractedText || null,
+          documentTruncated: clauseAnalysis?.truncated || false,
+        });
 
       } else if (event.type === "chunk") {
         fullAnswer += event.payload;

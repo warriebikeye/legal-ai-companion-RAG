@@ -9,6 +9,15 @@ const TransactionSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // Set on "referral_reward" transactions — the referee whose signup
+    // earned the referrer this reward. Used for idempotency (one reward
+    // per referred user), since the referee itself is no longer credited.
+    referredUser: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
     type: {
       type: String,
       enum: ["credit", "debit"],

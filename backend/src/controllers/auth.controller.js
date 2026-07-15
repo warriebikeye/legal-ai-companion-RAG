@@ -18,6 +18,22 @@ function addDays(date, days) {
   return d;
 }
 
+/* ─── Welcome push — delayed ───
+   oneSignalLogin(email) only runs client-side AFTER this request
+   resolves, and can itself take up to ~10s waiting for the native
+   Median bridge. Sending immediately races the device linking
+   itself to this email in OneSignal, so the push would silently
+   match 0 recipients. Delaying gives that linkage time to land. */
+const WELCOME_PUSH_DELAY_MS = 7000;
+
+function sendWelcomeNotificationDelayed(email, firstname) {
+  setTimeout(() => {
+    sendWelcomeNotification(email, firstname).catch((err) => {
+      console.error("[welcomeNotification] Welcome push failed (non-fatal):", err.message);
+    });
+  }, WELCOME_PUSH_DELAY_MS);
+}
+
 /* =========================================================
    REGISTER
    Accepts optional referralCode from body or ?ref= query
@@ -128,10 +144,8 @@ export const verifyEmail = async (req, res) => {
       });
     }
 
-    /* ── Welcome push for first-time verified users — non-blocking ── */
-    sendWelcomeNotification(user.email, user.firstname || user.name).catch((err) => {
-      console.error("[verifyEmail] Welcome push failed (non-fatal):", err.message);
-    });
+    /* ── Welcome push for first-time verified users — delayed, non-blocking ── */
+    sendWelcomeNotificationDelayed(user.email, user.firstname || user.name);
 
     req.logIn(user, (err) => {
       if (err) return res.status(500).json({ error: "Login after verify failed." });
@@ -148,22 +162,13 @@ export const verifyEmail = async (req, res) => {
 /* =========================================================
    CREDIT REFERRAL REWARD (internal)
    Called after referee verifies email.
-   Credits both referee and referrer 75 tokens each.
-   Idempotent — checks for existing reward first.
+   Credits only the REFERRER 75 tokens — the referee gets no
+   reward for being referred.
+   Idempotent — checks for an existing reward tied to this
+   specific referee first.
 ========================================================= */
 async function creditReferralReward(referee) {
   console.log(`[referral] Processing reward for: ${referee.email}`);
-
-  /* ── Idempotency — prevent double crediting ── */
-  const alreadyRewarded = await Transaction.findOne({
-    user: referee._id,
-    action: "referral_reward",
-  });
-
-  if (alreadyRewarded) {
-    console.log(`[referral] Already credited to ${referee.email} — skipping`);
-    return;
-  }
 
   const referrer = await User.findById(referee.referredBy);
   if (!referrer) {
@@ -171,30 +176,28 @@ async function creditReferralReward(referee) {
     return;
   }
 
-  const expiresAt = addDays(new Date(), TOKEN_EXPIRY_DAYS);
-
-  /* ── Credit referee ── */
-  referee.wallet += REFERRAL_REWARD;
-  await referee.save();
-
-  await Transaction.create({
-    user: referee._id,
-    type: "credit",
-    tokens: REFERRAL_REWARD,
+  /* ── Idempotency — prevent double crediting the referrer for this referee ── */
+  const alreadyRewarded = await Transaction.findOne({
+    user: referrer._id,
+    referredUser: referee._id,
     action: "referral_reward",
-    expiresAt,
-    status: "success",
   });
 
-  console.log(`[referral] Credited ${REFERRAL_REWARD} tokens to referee: ${referee.email}`);
+  if (alreadyRewarded) {
+    console.log(`[referral] Referrer already credited for ${referee.email} — skipping`);
+    return;
+  }
 
-  /* ── Credit referrer ── */
+  const expiresAt = addDays(new Date(), TOKEN_EXPIRY_DAYS);
+
+  /* ── Credit referrer only ── */
   referrer.wallet += REFERRAL_REWARD;
   referrer.referralCount += 1;
   await referrer.save();
 
   await Transaction.create({
     user: referrer._id,
+    referredUser: referee._id,
     type: "credit",
     tokens: REFERRAL_REWARD,
     action: "referral_reward",
@@ -204,9 +207,8 @@ async function creditReferralReward(referee) {
 
   console.log(`[referral] Credited ${REFERRAL_REWARD} tokens to referrer: ${referrer.email}`);
 
-  /* ── Email both parties — non-blocking ── */
-  sendReferralRewardEmail(referee.email, referee.firstname || referee.name, REFERRAL_REWARD, false).catch(() => { });
-  sendReferralRewardEmail(referrer.email, referrer.firstname || referrer.name, REFERRAL_REWARD, true).catch(() => { });
+  /* ── Email referrer only — non-blocking ── */
+  sendReferralRewardEmail(referrer.email, referrer.firstname || referrer.name, REFERRAL_REWARD).catch(() => { });
 }
 
 /* =========================================================
@@ -267,9 +269,7 @@ export const googleCallback = (req, res, next) => {
       setAuthCookie(res, user);
 
       if (user.isNewUser) {
-        sendWelcomeNotification(user.email, user.firstname || user.name).catch((err) => {
-          console.error("[googleCallback] Welcome push failed (non-fatal):", err.message);
-        });
+        sendWelcomeNotificationDelayed(user.email, user.firstname || user.name);
       }
 
       const isMobile = req.session.intent === "1";

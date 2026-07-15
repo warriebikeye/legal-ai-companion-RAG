@@ -43,18 +43,12 @@ export async function sendVerificationEmail(toEmail, token) {
 /* =========================================================
    REFERRAL REWARD EMAIL
 ========================================================= */
-export async function sendReferralRewardEmail(toEmail, firstname, tokens, isReferrer) {
+export async function sendReferralRewardEmail(toEmail, firstname, tokens) {
   try {
     const resend   = getResend();
-    const subject  = isReferrer
-      ? `You earned ${tokens} tokens! Your referral joined Clauzify`
-      : `Welcome bonus — ${tokens} tokens added to your wallet`;
-    const headline = isReferrer
-      ? `Your referral just verified their account`
-      : `Your welcome bonus is ready`;
-    const body = isReferrer
-      ? `Someone you referred just joined Clauzify and verified their email. We've added <strong>${tokens} tokens</strong> to your wallet as a thank you.`
-      : `You joined Clauzify via a referral link. We've added <strong>${tokens} tokens</strong> to your wallet as a welcome bonus — on top of your daily free queries.`;
+    const subject  = `You earned ${tokens} tokens! Your referral joined Clauzify`;
+    const headline = `Your referral just verified their account`;
+    const body     = `Someone you referred just joined Clauzify and verified their email. We've added <strong>${tokens} tokens</strong> to your wallet as a thank you.`;
 
     const { data, error } = await resend.emails.send({
       from: `CLAUZIFY <${process.env.EMAIL_FROM}>`,
@@ -103,13 +97,9 @@ export async function sendReferralInviteEmail(toEmail, referrerFirstname, referr
             <strong>${referrerFirstname || "A friend"}</strong> thinks you'd find Clauzify useful —
             Africa's legal intelligence engine for reviewing contracts and getting instant legal answers.
           </p>
-          <div style="margin:24px 0;padding:16px;background:rgba(200,169,74,0.1);border:1px solid rgba(200,169,74,0.3);border-radius:8px;text-align:center">
-            <span style="font-size:22px;font-weight:700;color:#c8a94a">Get 75 free tokens</span>
-            <p style="margin:4px 0 0;font-size:12px;color:#999">when you sign up via this link</p>
-          </div>
           <a href="${referralLink}"
-             style="display:inline-block;margin-top:8px;padding:12px 28px;background:#c8a94a;color:#000;border-radius:6px;font-weight:700;text-decoration:none;font-size:15px">
-            Join Clauzify — Get 75 Tokens
+             style="display:inline-block;margin-top:24px;padding:12px 28px;background:#c8a94a;color:#000;border-radius:6px;font-weight:700;text-decoration:none;font-size:15px">
+            Join Clauzify
           </a>
           <p style="color:#555;font-size:11px;margin-top:32px">Africa's Legal Intelligence Engine</p>
         </div>

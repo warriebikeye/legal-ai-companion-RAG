@@ -101,6 +101,49 @@ export async function getEmbedding(text) {
 }
 
 /* =========================================================
+   Simple structured-JSON call (no RAG context/history)
+
+   preferredModel — explicit model override (e.g. "gemini-2.0-flash")
+   taskType       — AI_TASKS value, used to resolve a model when
+                    preferredModel is omitted
+
+   Forces JSON output via responseMimeType so callers can safely
+   JSON.parse() the result without markdown-fence stripping.
+========================================================= */
+
+export async function simple(prompt, { taskType = "classification", preferredModel } = {}) {
+  const resolvedModel = resolveModel({ modelName: preferredModel, task: taskType });
+  const started = Date.now();
+
+  try {
+    const model = getModel(resolvedModel);
+
+    log("Gemini simple() call started", {
+      resolvedModel,
+      taskType,
+      promptLength: prompt?.length || 0,
+    });
+
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json" },
+    });
+    const response = result?.response?.text?.() || "";
+    const durationMs = Date.now() - started;
+
+    log("✅ Gemini simple() call completed", { resolvedModel, durationMs });
+
+    trackModelCall(resolvedModel);
+    trackLatency(durationMs);
+
+    return response;
+  } catch (err) {
+    console.error("❌ Gemini simple() error", { resolvedModel, message: err?.message });
+    throw err;
+  }
+}
+
+/* =========================================================
    Generate Answer — non-streaming (internal / cache path)
 
    modelName  — explicit override; omit to let getModelForTask() decide
