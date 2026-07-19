@@ -1,4 +1,5 @@
 import * as geminiLLM from "../llm/gemini.js";
+import { AI_MODELS } from "../config/ai.config.js";
 
 /* =========================================================
    LOGGER
@@ -47,14 +48,21 @@ function trimText(
    Computed deterministically from the classified issue counts
    rather than asked of the LLM directly — keeps the number
    auditable/consistent instead of an invented figure.
+
+   Ratio-based: score = how much of the document's expected
+   clauses are actually fine, weighted by severity — NOT a flat
+   100-minus-penalties deduction. Compliant clauses count fully,
+   needs-attention clauses count for half credit, and high-risk /
+   missing-mandatory clauses count for none (but still count
+   toward the total, since they represent an expected clause).
 ========================================================= */
 
-function computeHealthScore({ needsAttention, highRisk, missingMandatory }) {
-  const score =
-    100 -
-    needsAttention * 3 -
-    highRisk * 10 -
-    missingMandatory * 15;
+function computeHealthScore({ compliant, needsAttention, highRisk, missingMandatory }) {
+  const totalClauses = compliant + needsAttention + highRisk + missingMandatory;
+  if (totalClauses === 0) return 100;
+
+  const weightedGood = compliant * 1 + needsAttention * 0.5;
+  const score = Math.round((weightedGood / totalClauses) * 100);
 
   return Math.max(0, Math.min(100, score));
 }
@@ -147,7 +155,7 @@ ${trimmed}
               "chunk_analysis",
 
             preferredModel:
-              "gemini-2.0-flash",
+              AI_MODELS.FLASH,
           }
         );
 
@@ -195,7 +203,7 @@ ${trimmed}
         suggestedRevision: i.suggestedRevision || "",
       }));
 
-      const healthScore = computeHealthScore({ needsAttention, highRisk, missingMandatory });
+      const healthScore = computeHealthScore({ compliant, needsAttention, highRisk, missingMandatory });
       const overallRecommendation = computeRecommendation(healthScore);
 
       log(
