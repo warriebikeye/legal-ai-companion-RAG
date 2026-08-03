@@ -2,7 +2,7 @@
 
 export const COSTS = {
   question:             4,
-  review:              65,
+  review:              30,
   referral_connection: 20,
 };
 
@@ -23,7 +23,7 @@ export const BUNDLES = [
     id:       "standard",
     tokens:   170,
     label:    "Standard",
-    usdEquiv: 2.00,
+    usdEquiv: 2.50,
     localAmounts: {
       NGN: 3500,
       KES: 450,
@@ -35,7 +35,7 @@ export const BUNDLES = [
     id:       "pro",
     tokens:   400,
     label:    "Pro",
-    usdEquiv: 4.00,
+    usdEquiv: 5.00,
     localAmounts: {
       NGN: 8000,
       KES: 1000,
@@ -47,7 +47,7 @@ export const BUNDLES = [
     id:       "power",
     tokens:   900,
     label:    "Power",
-    usdEquiv: 8.00,
+    usdEquiv: 12.00,
     localAmounts: {
       NGN: 18000,
       KES: 2300,

@@ -1,5 +1,6 @@
 // src/utils/mailer.js
 import { Resend } from "resend";
+import { COSTS } from "../config/tokens.js";
 
 /* ── Get Resend client lazily — ensures dotenv is loaded first ── */
 function getResend() {
@@ -142,8 +143,8 @@ export async function sendTokenExpiryWarningEmail(toEmail, firstname, tokens, da
             </p>
           </div>
           <ul style="color:#ccc;font-size:14px;line-height:2;padding-left:20px;margin:8px 0 20px">
-            <li>Ask up to ${Math.floor(tokens / 4)} legal questions</li>
-            <li>Review ${Math.floor(tokens / 65)} contract${Math.floor(tokens / 65) !== 1 ? "s" : ""} + get PDF reports</li>
+            <li>Ask up to ${Math.floor(tokens / COSTS.question)} legal questions</li>
+            <li>Review ${Math.floor(tokens / COSTS.review)} contract${Math.floor(tokens / COSTS.review) !== 1 ? "s" : ""} + get PDF reports</li>
           </ul>
           <a href="${process.env.CLIENT_URL_PROD || process.env.CLIENT_URL_TEST}"
              style="display:inline-block;padding:12px 28px;background:#c8a94a;color:#000;border-radius:6px;font-weight:700;text-decoration:none;font-size:15px">
