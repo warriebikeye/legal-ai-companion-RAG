@@ -63,6 +63,11 @@ export function setAuthCookie(res, user) {
     ...sharedOptions,
     httpOnly: false,
   });
+
+  // Return the token too, so callers can also hand it back in the JSON
+  // response body — lets clients that can't rely on cross-site cookies
+  // (e.g. a WebView-wrapped app) store it and send it as a Bearer header.
+  return token;
 }
 
 /**

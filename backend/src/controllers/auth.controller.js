@@ -149,8 +149,8 @@ export const verifyEmail = async (req, res) => {
 
     req.logIn(user, (err) => {
       if (err) return res.status(500).json({ error: "Login after verify failed." });
-      setAuthCookie(res, user);
-      return res.json({ success: true });
+      const authToken = setAuthCookie(res, user);
+      return res.json({ success: true, token: authToken });
     });
 
   } catch (err) {
@@ -239,9 +239,9 @@ export const login = async (req, res) => {
 
     req.logIn(user, (err) => {
       if (err) return res.status(500).json({ error: "Login failed." });
-      setAuthCookie(res, user);
+      const authToken = setAuthCookie(res, user);
       console.log(`[login] User logged in: ${user.email}`);
-      return res.json({ success: true });
+      return res.json({ success: true, token: authToken });
     });
 
   } catch (err) {
@@ -299,7 +299,7 @@ export function me(req, res) {
     return res.json({ isAuthenticated: false });
   }
 
-  setAuthCookie(res, req.user);
+  const authToken = setAuthCookie(res, req.user);
 
   res.json({
     isAuthenticated: true,
@@ -313,6 +313,7 @@ export function me(req, res) {
     subscriptionStatus: req.user.subscriptionStatus,
     subscriptionPlan: req.user.subscriptionPlan,
     subscriptionExpiresAt: req.user.subscriptionExpiresAt,
+    token: authToken,
   });
 }
 
