@@ -11,6 +11,41 @@ function addDays(date, days) {
 }
 
 /* =========================================================
+   Verify a transaction with Flutterwave, retrying transient
+   failures (network errors, 429, 5xx) with exponential
+   backoff. Non-retryable errors (4xx besides 429, e.g. an
+   invalid transaction id) fail immediately.
+========================================================= */
+async function verifyWithFlutterwave(transactionId, retries = 3, delayMs = 500) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const flwResponse = await axios.get(
+        `https://api.flutterwave.com/v3/transactions/${transactionId}/verify`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
+          },
+        }
+      );
+      return flwResponse.data?.data;
+    } catch (err) {
+      const status      = err.response?.status;
+      const isRetryable = !status || status === 429 || status >= 500;
+
+      if (!isRetryable || attempt === retries) {
+        throw err;
+      }
+
+      console.warn(
+        `[verifyPayment] FLW verify attempt ${attempt}/${retries} failed (${status || err.message}) — retrying in ${delayMs}ms`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      delayMs *= 2;
+    }
+  }
+}
+
+/* =========================================================
    POST /payments/verify
    Body: { transactionId, txRef, bundleId }
 ========================================================= */
@@ -68,16 +103,7 @@ export async function verifyPayment(req, res) {
 
     /* ─── Verify with Flutterwave — confirm payment succeeded ─── */
     console.log("[verifyPayment] Calling FLW API...");
-    const flwResponse = await axios.get(
-      `https://api.flutterwave.com/v3/transactions/${transactionId}/verify`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
-        },
-      }
-    );
-
-    const payment = flwResponse.data?.data;
+    const payment = await verifyWithFlutterwave(transactionId);
 
     console.log("[verifyPayment] FLW response:", {
       status:   payment?.status,
@@ -101,27 +127,46 @@ export async function verifyPayment(req, res) {
       });
     }
 
-    /* ─── Credit wallet ─── */
-    user.wallet += bundle.tokens;
-    await user.save();
+    /* ─── Log credit transaction FIRST — this is the concurrency
+       gate. flwReference has a unique index, so if /verify and
+       /webhook (or a duplicate call) race each other, only one
+       insert can win; the loser hits the catch block below and
+       never touches the wallet. ─── */
+    try {
+      await Transaction.create({
+        user:         user._id,
+        type:         "credit",
+        tokens:       bundle.tokens,
+        action:       "topup",
+        usdAmount:    bundle.usdEquiv,
+        bundleId:     bundle.id,
+        flwReference: String(transactionId),
+        expiresAt:    addDays(new Date(), TOKEN_EXPIRY_DAYS),
+        status:       "success",
+      });
+    } catch (err) {
+      if (err.code === 11000) {
+        console.warn("[verifyPayment] Duplicate transaction (race):", transactionId);
+        return res.status(409).json({
+          success: false,
+          message: "Transaction already processed",
+        });
+      }
+      throw err;
+    }
 
-    /* ─── Log credit transaction ─── */
-    await Transaction.create({
-      user:         user._id,
-      type:         "credit",
-      tokens:       bundle.tokens,
-      action:       "topup",
-      bundleId:     bundle.id,
-      flwReference: String(transactionId),
-      expiresAt:    addDays(new Date(), TOKEN_EXPIRY_DAYS),
-      status:       "success",
-    });
+    /* ─── Credit wallet atomically — no read-modify-write ─── */
+    const updatedUser = await User.findByIdAndUpdate(
+      user._id,
+      { $inc: { wallet: bundle.tokens } },
+      { new: true }
+    );
 
     console.log("[verifyPayment] Wallet credited:", {
       userId:  user._id,
       bundle:  bundle.id,
       tokens:  bundle.tokens,
-      balance: user.wallet,
+      balance: updatedUser.wallet,
     });
 
     return res.json({
@@ -129,7 +174,7 @@ export async function verifyPayment(req, res) {
       message: "Wallet topped up successfully",
       bundle:  bundle.label,
       tokens:  bundle.tokens,
-      wallet:  user.wallet,
+      wallet:  updatedUser.wallet,
     });
 
   } catch (err) {
@@ -178,22 +223,22 @@ export async function flutterwaveWebhook(req, res) {
       return res.status(200).json({ received: true });
     }
 
-    /* ─── Extract bundleId from tx_ref ───────────────────
-       tx_ref format from Flutterwave redirect URL will be
-       whatever FLW generates. We extract bundleId from the
-       redirect URL meta that FLW sends in the webhook body.
-       FLW includes the redirect_url in webhook payload so
-       we parse bundle= from it.
+    /* ─── Extract bundleId ────────────────────────────────
+       Flutterwave Inline sends bundleId directly in `meta`
+       on every transaction. Fall back to parsing it out of
+       the old Payment Links redirect URL for any in-flight
+       transactions started before the switch to Inline.
     ───────────────────────────────────────────────────── */
-    let bundleId = null;
+    let bundleId = payment?.meta?.bundleId || null;
 
-    try {
-      const redirectUrl = payment?.meta?.redirect || payment?.redirect_url || "";
-      const urlParams   = new URL(redirectUrl).searchParams;
-      bundleId          = urlParams.get("bundle");
-    } catch {
-      // redirect_url not parseable — try meta directly
-      bundleId = payment?.meta?.bundleId || null;
+    if (!bundleId) {
+      try {
+        const redirectUrl = payment?.meta?.redirect || payment?.redirect_url || "";
+        const urlParams   = new URL(redirectUrl).searchParams;
+        bundleId          = urlParams.get("bundle");
+      } catch {
+        bundleId = null;
+      }
     }
 
     if (!bundleId) {
@@ -214,26 +259,43 @@ export async function flutterwaveWebhook(req, res) {
       return res.status(200).json({ received: true });
     }
 
-    /* ─── Credit wallet ─── */
-    user.wallet += bundle.tokens;
-    await user.save();
+    /* ─── Log transaction FIRST — same concurrency gate as
+       /verify. If /verify already inserted this flwReference
+       (race with the browser callback), this insert hits the
+       unique-index conflict and we no-op instead of double
+       crediting. ─── */
+    try {
+      await Transaction.create({
+        user:         user._id,
+        type:         "credit",
+        tokens:       bundle.tokens,
+        action:       "topup",
+        usdAmount:    bundle.usdEquiv,
+        bundleId:     bundle.id,
+        flwReference: String(payment.id),
+        expiresAt:    addDays(new Date(), TOKEN_EXPIRY_DAYS),
+        status:       "success",
+      });
+    } catch (err) {
+      if (err.code === 11000) {
+        console.log("[webhook] Already processed (race with /verify):", payment.id);
+        return res.status(200).json({ received: true });
+      }
+      throw err;
+    }
 
-    /* ─── Log transaction ─── */
-    await Transaction.create({
-      user:         user._id,
-      type:         "credit",
-      tokens:       bundle.tokens,
-      action:       "topup",
-      bundleId:     bundle.id,
-      flwReference: String(payment.id),
-      expiresAt:    addDays(new Date(), TOKEN_EXPIRY_DAYS),
-      status:       "success",
-    });
+    /* ─── Credit wallet atomically ─── */
+    const updatedUser = await User.findByIdAndUpdate(
+      user._id,
+      { $inc: { wallet: bundle.tokens } },
+      { new: true }
+    );
 
     console.log("[webhook] Wallet credited:", {
-      userId: user._id,
-      bundle: bundle.id,
-      tokens: bundle.tokens,
+      userId:  user._id,
+      bundle:  bundle.id,
+      tokens:  bundle.tokens,
+      balance: updatedUser.wallet,
     });
 
     return res.status(200).json({ received: true });

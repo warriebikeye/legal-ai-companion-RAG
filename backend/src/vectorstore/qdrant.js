@@ -24,7 +24,7 @@ export const USER_DOCS_COLLECTION = "user_uploaded_docs";
    HELPERS
 ========================================================= */
 
-async function ensurePayloadIndex(collectionName, fieldName, fieldSchema) {
+export async function ensurePayloadIndex(collectionName, fieldName, fieldSchema) {
   try {
     await qdrant.createPayloadIndex(collectionName, {
       field_name: fieldName,

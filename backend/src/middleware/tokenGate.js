@@ -83,9 +83,42 @@ const tokenGate = (action = "auto") => {
         });
       }
 
-      /* ── Deduct tokens ── */
-      user.wallet -= cost;
-      await user.save();
+      /* ── Deduct tokens atomically ──────────────────────────
+         Conditional $inc: only succeeds if wallet is still
+         >= cost at the moment MongoDB applies it, so two
+         concurrent requests can't both pass the check above
+         and then race each other via read-modify-write.
+      ───────────────────────────────────────────────────── */
+      const updatedUser = await User.findOneAndUpdate(
+        { _id: user._id, wallet: { $gte: cost } },
+        { $inc: { wallet: -cost } },
+        { new: true }
+      );
+
+      if (!updatedUser) {
+        // Balance changed underneath us (or was already insufficient)
+        if (isStream) {
+          res.setHeader("Content-Type", "text/event-stream");
+          res.setHeader("Cache-Control", "no-cache");
+          res.setHeader("Connection", "keep-alive");
+          res.flushHeaders();
+          res.write(
+            `data: ${JSON.stringify({
+              type:     "error",
+              payload:  "insufficient_tokens",
+              required: cost,
+              current:  user.wallet,
+            })}\n\n`
+          );
+          return res.end();
+        }
+        return res.status(402).json({
+          error:    "insufficient_tokens",
+          message:  "Not enough tokens. Please top up your wallet.",
+          required: cost,
+          current:  user.wallet,
+        });
+      }
 
       /* ── Log debit ── */
       await Transaction.create({

@@ -1,9 +1,26 @@
 import express from 'express';
 import multer from 'multer';
+import fs from 'fs/promises';
+import path from 'path';
 import { ingestFile } from '../services/ingest.service.js';
+import { folderIngestionQueue } from '../queue/folderIngestion.queue.js';
+import { acquireLock, releaseLock } from '../utils/distributedLock.js';
+import redis from '../services/redis.js';
+import { SUPPORTED_COUNTRIES } from '../config/countries.js';
+import { INGESTION_ROOT } from '../config/ingestionPaths.js';
 
 const upload = multer({ dest: 'uploads/' });
 const router = express.Router();
+
+const PDF_OR_TXT = /\.(pdf|txt)$/i;
+const BATCH_LOCK_TTL_SECONDS = 60 * 60 * 4; // safety ceiling in case a worker dies mid-batch
+
+function log(step, data = null) {
+  const timestamp = new Date().toISOString();
+  data
+    ? console.log(`[FOLDER_INGEST] [${timestamp}] ${step}`, data)
+    : console.log(`[FOLDER_INGEST] [${timestamp}] ${step}`);
+}
 
 /**
  * @swagger
@@ -127,5 +144,120 @@ router.post('/train/multiple', upload.array('files', 50), async (req, res) => {
   }
 });
 
+
+/**
+ * @swagger
+ * /ask/train/folder:
+ *   post:
+ *     summary: Scan local TO folders and enqueue background ingestion for each country
+ *     description: >
+ *       Reads PDFs from <INGESTION_ROOT>/<Country>/TO, skips files whose exact
+ *       content is already in that country's collection (moved straight to
+ *       DONE), and enqueues the rest for background ingestion. Files only
+ *       move to DONE after ingestion (or the duplicate check) succeeds.
+ *     tags: [Ingest]
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               country:
+ *                 type: string
+ *                 description: Optional single country name to scan (defaults to all supported countries)
+ *                 example: Nigeria
+ *     responses:
+ *       200:
+ *         description: Per-country scan/enqueue results
+ *       400:
+ *         description: Unknown country name
+ */
+router.post('/train/folder', async (req, res) => {
+  const { country } = req.body || {};
+
+  log('Trigger received', { country: country || 'ALL' });
+
+  const targets = country
+    ? SUPPORTED_COUNTRIES.filter(
+        (c) =>
+          c.name.toLowerCase() === String(country).toLowerCase() ||
+          c.slug === String(country).toLowerCase()
+      )
+    : SUPPORTED_COUNTRIES;
+
+  if (country && targets.length === 0) {
+    log('Unknown country — aborting', { country });
+    return res.status(400).json({ error: `Unknown country: ${country}` });
+  }
+
+  const results = [];
+
+  for (const { name, slug } of targets) {
+    const lockKey = `lock:folder-ingest:${slug}`;
+    const statsKey = `folder-ingest-stats:${slug}`;
+    log('Scanning country', { country: name });
+
+    const locked = await acquireLock(lockKey, BATCH_LOCK_TTL_SECONDS);
+
+    if (!locked) {
+      log('Batch already in progress — skipping', { country: name });
+      results.push({ country: name, status: 'skipped', reason: 'batch already in progress' });
+      continue;
+    }
+
+    const toDir = path.join(INGESTION_ROOT, name, 'TO');
+    const doneDir = path.join(INGESTION_ROOT, name, 'DONE');
+
+    try {
+      let entries;
+      try {
+        entries = await fs.readdir(toDir, { withFileTypes: true });
+      } catch {
+        log('TO folder not found — skipping', { country: name, toDir });
+        results.push({ country: name, status: 'skipped', reason: 'TO folder not found' });
+        await releaseLock(lockKey);
+        continue;
+      }
+
+      const files = entries.filter((e) => e.isFile() && PDF_OR_TXT.test(e.name));
+      log('Files found', { country: name, totalEntries: entries.length, matching: files.length });
+
+      if (files.length === 0) {
+        log('No matching files — releasing lock', { country: name });
+        results.push({ country: name, status: 'ok', enqueued: 0 });
+        await releaseLock(lockKey);
+        continue;
+      }
+
+      // Held by the worker: decremented per finished job, lock released at zero.
+      await redis.set(`folder-ingest-remaining:${slug}`, files.length);
+      await redis.del(statsKey);
+
+      for (const entry of files) {
+        await folderIngestionQueue.add('ingest-file', {
+          country: name,
+          slug,
+          fileName: entry.name,
+          filePath: path.join(toDir, entry.name),
+          doneDir,
+          lockKey,
+          statsKey,
+        });
+        log('Enqueued file', { country: name, fileName: entry.name });
+      }
+
+      log('Country scan complete', { country: name, enqueued: files.length });
+      results.push({ country: name, status: 'ok', enqueued: files.length });
+    } catch (err) {
+      log('Country scan failed', { country: name, error: err.message });
+      await releaseLock(lockKey);
+      results.push({ country: name, status: 'error', error: err.message });
+    }
+  }
+
+  log('Trigger handling complete', { results });
+  res.json({ message: '📥 Folder ingestion jobs enqueued', results });
+});
 
 export default router;

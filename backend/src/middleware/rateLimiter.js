@@ -20,6 +20,12 @@ export const apiRateLimiter =
 
     legacyHeaders: false,
 
+    // Flutterwave's webhook calls from their own infrastructure,
+    // not a per-user IP — it gets its own dedicated limiter
+    // (see webhookRateLimiter below) instead of sharing this
+    // per-user budget.
+    skip: (req) => req.originalUrl.startsWith("/payments/webhook"),
+
     //trustProxy: true,
 
     message: {
@@ -94,4 +100,25 @@ export const meLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests." },
+});
+
+/* =========================================================
+   WEBHOOK LIMITER
+   Flutterwave calls this from their own servers, not a
+   per-user IP, so it's exempted from apiRateLimiter above
+   and given its own generous-but-present budget instead —
+   high enough to absorb legitimate bursts, low enough to
+   still guard against abuse of the (signature-verified but
+   otherwise public) endpoint.
+========================================================= */
+export const webhookRateLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 300,                 // 300 webhook calls per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many webhook requests." },
+  handler: (req, res, next, options) => {
+    console.error("❌ WEBHOOK RATE LIMIT EXCEEDED", { ip: req.ip });
+    res.status(options.statusCode).json(options.message);
+  },
 });

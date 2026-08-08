@@ -7,8 +7,9 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "worker": "node src/workers/ingestion.worker.js",
-    "dev:all": "concurrently \"npm run dev\" \"npm run worker\"",
-    "start:all": "concurrently --kill-others-on-fail \"npm run start\" \"npm run worker\"",
+    "worker:folder": "node src/workers/folderIngestion.worker.js",
+    "dev:all": "concurrently \"npm run dev\" \"npm run worker\" \"npm run worker:folder\"",
+    "start:all": "concurrently --kill-others-on-fail \"npm run start\" \"npm run worker\" \"npm run worker:folder\"",
     "build": "echo 'No build step required'"
   },
   "keywords": [],

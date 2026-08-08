@@ -3,6 +3,7 @@
 import mongoose from "mongoose";
 import { ingestionQueue } from "../queue/ingestion.queue.js";
 import User from "../models/User.js";
+import Transaction from "../models/Transaction.js";
 import redis from "./redis.js";
 
 /* =========================================================
@@ -281,6 +282,51 @@ async function getViolationStats() {
 }
 
 /* =========================================================
+   REVENUE / TRANSACTIONS — from the Transaction ledger
+========================================================= */
+
+async function getRevenueStats() {
+  const [totals, recent] = await Promise.all([
+    Transaction.aggregate([
+      { $match: { type: "credit", action: "topup", status: "success" } },
+      {
+        $group: {
+          _id:         null,
+          totalUsd:    { $sum: "$usdAmount" },
+          totalTokens: { $sum: "$tokens" },
+          count:       { $sum: 1 },
+        },
+      },
+    ]),
+    Transaction.find()
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .populate("user", "name email")
+      .select("user type action tokens usdAmount bundleId status createdAt")
+      .lean(),
+  ]);
+
+  const t = totals[0] || { totalUsd: 0, totalTokens: 0, count: 0 };
+
+  return {
+    totalUsd:    t.totalUsd || 0,
+    totalTokens: t.totalTokens || 0,
+    topupCount:  t.count || 0,
+    recent: recent.map((tx) => ({
+      id:        tx._id.toString(),
+      name:      tx.user?.name || tx.user?.email?.split("@")[0] || "Unknown",
+      email:     tx.user?.email || "—",
+      type:      tx.type,
+      action:    tx.action,
+      tokens:    tx.tokens,
+      usdAmount: tx.usdAmount,
+      status:    tx.status,
+      createdAt: tx.createdAt,
+    })),
+  };
+}
+
+/* =========================================================
    SYSTEM HEALTH — MongoDB + Qdrant ping
 ========================================================= */
 
@@ -339,6 +385,7 @@ export async function getDashboardStats({ tier = null } = {}) {
     modelUsage,
     violations,
     health,
+    revenue,
   ] = await Promise.allSettled([
     getUserStats(),
     getRecentUsers(20, tier),
@@ -348,6 +395,7 @@ export async function getDashboardStats({ tier = null } = {}) {
     getModelUsageStats(),
     getViolationStats(),
     getSystemHealth(),
+    getRevenueStats(),
   ]);
 
   const resolve = (result, fallback) =>
@@ -363,6 +411,7 @@ export async function getDashboardStats({ tier = null } = {}) {
     modelUsage: resolve(modelUsage, {}),
     violations: resolve(violations, {}),
     health: resolve(health, {}),
+    revenue: resolve(revenue, { totalUsd: 0, totalTokens: 0, topupCount: 0, recent: [] }),
   };
 
   if (!tier) {

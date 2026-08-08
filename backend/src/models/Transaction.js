@@ -41,7 +41,7 @@ const TransactionSchema = new mongoose.Schema(
     // Topup metadata
     usdAmount:    { type: Number, default: null },
     bundleId:     { type: String, default: null },
-    flwReference: { type: String, default: null, index: true },
+    flwReference: { type: String, default: null, index: true, unique: true, sparse: true },
     // Expiry — set on every credit
     expiresAt: { type: Date, default: null, index: true },
     // Expiry warning sent
