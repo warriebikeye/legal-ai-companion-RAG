@@ -1,6 +1,7 @@
 // src/routes/auth.routes.js
 import { Router } from "express";
 import passport from "passport";
+import multer from "multer";
 import {
   googleCallback,
   me,
@@ -8,13 +9,31 @@ import {
   register,
   verifyEmail,
   login,
+  updateProfile,
+  uploadAvatarHandler,
+  requestPasswordChange,
+  confirmPasswordChange,
 } from "../controllers/auth.controller.js";
 import {
   authRateLimiter,
   meLimiter,
 } from "../middleware/rateLimiter.js";
+import { requireAuth } from "../middleware/requireAuth.js";
 
 const router = Router();
+
+/* ─── Avatar upload — memory storage, streamed straight to
+   Cloudinary (no temp files on disk) ─── */
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Only image files are allowed."));
+    }
+    cb(null, true);
+  },
+});
 
 /* =========================================================
    EMAIL / PASSWORD AUTH
@@ -131,6 +150,116 @@ router.get("/google/callback", googleCallback);
  *                   type: string
  */
 router.get("/me", meLimiter, me);
+
+/**
+ * @swagger
+ * /auth/profile:
+ *   put:
+ *     summary: Update the current user's profile (name, avatar)
+ *     tags: [Auth]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               firstname:
+ *                 type: string
+ *               lastname:
+ *                 type: string
+ *               photo:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Updated profile
+ *       401:
+ *         description: Unauthorized
+ */
+router.put("/profile", requireAuth, updateProfile);
+
+/**
+ * @swagger
+ * /auth/password/request:
+ *   post:
+ *     summary: Start a password change — verifies current password, emails a confirmation code
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [currentPassword, newPassword]
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Confirmation code emailed
+ *       400:
+ *         description: Validation error (weak password, no password set, same as old)
+ *       401:
+ *         description: Current password incorrect, or unauthenticated
+ */
+router.post("/password/request", authRateLimiter, requireAuth, requestPasswordChange);
+
+/**
+ * @swagger
+ * /auth/password/confirm:
+ *   post:
+ *     summary: Finish a password change with the emailed confirmation code
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [code]
+ *             properties:
+ *               code:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password changed
+ *       400:
+ *         description: No pending change, or code expired
+ *       401:
+ *         description: Invalid code, or unauthenticated
+ */
+router.post("/password/confirm", authRateLimiter, requireAuth, confirmPasswordChange);
+
+/**
+ * @swagger
+ * /auth/avatar:
+ *   post:
+ *     summary: Upload a new avatar image (multipart/form-data, field name "avatar")
+ *     tags: [Auth]
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               avatar:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Uploaded avatar URL
+ *       400:
+ *         description: Missing or invalid image
+ *       401:
+ *         description: Unauthorized
+ */
+router.post("/avatar", requireAuth, (req, res, next) => {
+  avatarUpload.single("avatar")(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message || "Upload failed." });
+    next();
+  });
+}, uploadAvatarHandler);
 
 /**
  * @swagger

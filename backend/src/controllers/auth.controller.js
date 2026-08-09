@@ -6,10 +6,13 @@ import Transaction from "../models/Transaction.js";
 import {
   sendVerificationEmail,
   sendReferralRewardEmail,
+  sendPasswordChangedEmail,
+  sendPasswordChangeCodeEmail,
 } from "../utils/mailer.js";
 import { setAuthCookie, clearAuthCookie } from "../utils/setAuthCookie.js";
 import { REFERRAL_REWARD, TOKEN_EXPIRY_DAYS } from "../config/tokens.js";
 import { sendDailyResetNotification, sendWelcomeNotification } from "../utils/onesignal.js";
+import { uploadAvatar } from "../utils/cloudinary.js";
 
 /* ─── Helper ─── */
 function addDays(date, days) {
@@ -303,12 +306,12 @@ export function me(req, res) {
 
   res.json({
     isAuthenticated: true,
-    user: req.user,
     userEmail: req.user.email,
     userImage: req.user.photo,
     name: req.user.name,
     firstname: req.user.firstname,
     lastname: req.user.lastname,
+    hasPassword: !!req.user.password,
     subscriptionTier: req.user.subscriptionTier,
     subscriptionStatus: req.user.subscriptionStatus,
     subscriptionPlan: req.user.subscriptionPlan,
@@ -316,6 +319,200 @@ export function me(req, res) {
     token: authToken,
   });
 }
+
+/* =========================================================
+   UPDATE PROFILE
+========================================================= */
+export const updateProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id || req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    const { firstname, lastname } = req.body;
+
+    if (firstname !== undefined) {
+      const trimmed = String(firstname).trim();
+      if (!trimmed) {
+        return res.status(400).json({ error: "First name cannot be empty." });
+      }
+      user.firstname = trimmed;
+    }
+
+    if (lastname !== undefined) {
+      user.lastname = String(lastname).trim();
+    }
+
+    await user.save();
+
+    const token = setAuthCookie(res, user);
+
+    return res.json({
+      success: true,
+      firstname: user.firstname,
+      lastname: user.lastname,
+      photo: user.photo,
+      email: user.email,
+      subscriptionTier: user.subscriptionTier,
+      subscriptionStatus: user.subscriptionStatus,
+      token,
+    });
+  } catch (err) {
+    console.error("[updateProfile]", err);
+    return res.status(500).json({ error: "Failed to update profile." });
+  }
+};
+
+/* =========================================================
+   CHANGE PASSWORD — two-step, email-code confirmed
+
+   1. requestPasswordChange: verifies currentPassword, hashes
+      newPassword, stashes it as pendingPasswordHash, emails a
+      6-digit code. Nothing about the live password changes yet.
+   2. confirmPasswordChange: checks the code, and only then
+      promotes pendingPasswordHash to the real password.
+========================================================= */
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_CHANGE_CODE_TTL_MS = 15 * 60 * 1000;
+
+function passwordStrengthError(password) {
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`;
+  }
+  if (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
+    return "Password must include both letters and numbers.";
+  }
+  return null;
+}
+
+export const requestPasswordChange = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Current and new password are required." });
+    }
+
+    const strengthError = passwordStrengthError(newPassword);
+    if (strengthError) {
+      return res.status(400).json({ error: strengthError });
+    }
+
+    const user = await User.findById(req.user._id || req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    if (!user.password) {
+      return res.status(400).json({
+        error: "This account signed in with Google and has no password set.",
+      });
+    }
+
+    const currentMatches = await bcrypt.compare(currentPassword, user.password);
+    if (!currentMatches) {
+      return res.status(401).json({ error: "Current password is incorrect." });
+    }
+
+    const sameAsCurrent = await bcrypt.compare(newPassword, user.password);
+    if (sameAsCurrent) {
+      return res.status(400).json({ error: "New password must be different from your current password." });
+    }
+
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+
+    user.pendingPasswordHash = await bcrypt.hash(newPassword, 12);
+    user.passwordChangeCode = code;
+    user.passwordChangeCodeExpiry = new Date(Date.now() + PASSWORD_CHANGE_CODE_TTL_MS);
+    await user.save();
+
+    await sendPasswordChangeCodeEmail(user.email, user.firstname || user.name, code);
+
+    return res.json({ success: true, message: "Confirmation code sent to your email." });
+  } catch (err) {
+    console.error("[requestPasswordChange]", err);
+    return res.status(500).json({ error: "Failed to start password change." });
+  }
+};
+
+export const confirmPasswordChange = async (req, res) => {
+  try {
+    const { code } = req.body;
+
+    if (!code) {
+      return res.status(400).json({ error: "Confirmation code is required." });
+    }
+
+    const user = await User.findById(req.user._id || req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    if (!user.pendingPasswordHash || !user.passwordChangeCode) {
+      return res.status(400).json({ error: "No pending password change. Please start over." });
+    }
+
+    if (user.passwordChangeCodeExpiry < new Date()) {
+      user.pendingPasswordHash = undefined;
+      user.passwordChangeCode = undefined;
+      user.passwordChangeCodeExpiry = undefined;
+      await user.save();
+      return res.status(400).json({ error: "Code expired. Please start over." });
+    }
+
+    if (user.passwordChangeCode !== String(code)) {
+      return res.status(401).json({ error: "Invalid code." });
+    }
+
+    user.password = user.pendingPasswordHash;
+    user.pendingPasswordHash = undefined;
+    user.passwordChangeCode = undefined;
+    user.passwordChangeCodeExpiry = undefined;
+    await user.save();
+
+    sendPasswordChangedEmail(user.email, user.firstname || user.name).catch((err) => {
+      console.error("[confirmPasswordChange] Notification email failed (non-fatal):", err.message);
+    });
+
+    return res.json({ success: true, message: "Password updated successfully." });
+  } catch (err) {
+    console.error("[confirmPasswordChange]", err);
+    return res.status(500).json({ error: "Failed to confirm password change." });
+  }
+};
+
+/* =========================================================
+   UPLOAD AVATAR
+========================================================= */
+export const uploadAvatarHandler = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No image file provided." });
+    }
+
+    const user = await User.findById(req.user._id || req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    const result = await uploadAvatar(req.file.buffer, user._id);
+
+    user.photo = result.secure_url;
+    await user.save();
+
+    const token = setAuthCookie(res, user);
+
+    return res.json({
+      success: true,
+      photo: user.photo,
+      token,
+    });
+  } catch (err) {
+    console.error("[uploadAvatarHandler]", err);
+    return res.status(500).json({ error: "Failed to upload avatar." });
+  }
+};
 
 /* =========================================================
    LOGOUT

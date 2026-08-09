@@ -107,6 +107,13 @@ const UserSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+
+    /* =========================================
+       Password change — pending, email-confirmed
+    ========================================= */
+    pendingPasswordHash: { type: String, default: null },
+    passwordChangeCode: { type: String, default: null },
+    passwordChangeCodeExpiry: { type: Date, default: null },
   },
   { timestamps: true }
 );
