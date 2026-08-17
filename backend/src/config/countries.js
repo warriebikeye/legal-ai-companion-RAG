@@ -13,4 +13,7 @@ export const SUPPORTED_COUNTRIES = [
   { name: "South Africa", slug: "south africa", aliases: ["south africa", "south african"] },
   { name: "Tanzania",     slug: "tanzania",     aliases: ["tanzania", "tanzanian"] },
   { name: "Liberia",      slug: "liberia",      aliases: ["liberia", "liberian"] },
+  { name: "Namibia",      slug: "namibia",      aliases: ["namibia", "namibian"] },
+  { name: "Uganda",       slug: "uganda",       aliases: ["uganda", "ugandan"] },
+  { name: "Botswana",     slug: "botswana",     aliases: ["botswana", "botswanan"] },
 ];

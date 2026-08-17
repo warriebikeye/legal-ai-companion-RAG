@@ -1,0 +1,28 @@
+# render.yaml — Gotenberg conversion service
+#
+# Defines ONLY the new Gotenberg service used by the template-preserving
+# document-generation feature (backend/src/services/gotenberg.service.js).
+# It does not declare the existing `backend` web service or its workers —
+# those are left exactly as already configured in the Render dashboard.
+#
+# To apply: Render dashboard -> New -> Blueprint -> point at this repo.
+# Render will offer to create the service below without touching anything
+# that already exists. After it's created, copy its internal/external URL
+# into the backend service's GOTENBERG_URL environment variable.
+#
+# This file is not self-deploying — nothing changes in your Render account
+# until you apply it via the dashboard (or `render blueprint launch`).
+
+services:
+  - type: pserv
+    name: gotenberg
+    runtime: image
+    image:
+      url: docker.io/gotenberg/gotenberg:8
+    plan: starter
+    region: oregon
+    dockerCommand: >
+      gotenberg
+      --api-timeout=30s
+      --libreoffice-auto-start=true
+    healthCheckPath: /health

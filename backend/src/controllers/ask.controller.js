@@ -18,6 +18,12 @@ import {
   appendMessage,
   loadRecentMessages,
 } from "../services/conversation.service.js";
+import { extractParagraphs, paragraphsToText } from "../services/docxStructure.service.js";
+import {
+  DOCX_MIME,
+  createDocumentTemplate,
+  linkDocumentToMessage,
+} from "../services/documentTemplate.service.js";
 
 const extractor = new ExtractionService();
 const clauseChecker = new ClauseCheckerService();
@@ -46,7 +52,7 @@ function buildHistoryText(messages, summary = "") {
 ========================================================= */
 
 async function processFiles({ files, userId, conversationId, country }) {
-  if (!files.length) return { extractedText: "", clauseAnalysis: null };
+  if (!files.length) return { extractedText: "", clauseAnalysis: null, documentId: null };
 
   log("Processing uploaded files");
 
@@ -61,6 +67,11 @@ async function processFiles({ files, userId, conversationId, country }) {
     conversationId: conversationId.toString(),
   });
 
+  // Populated only for a single native .docx upload — reused below so the
+  // clause checker can anchor issues to a real paragraph index, and so
+  // createDocumentTemplate() doesn't re-parse the same buffer twice.
+  let docxNativeParagraphs = null;
+
   let extractedText = "";
   for (const file of files) {
     let text = "";
@@ -70,6 +81,14 @@ async function processFiles({ files, userId, conversationId, country }) {
       text = await extractor.extractFromTXT(file.buffer);
     } else if (file.mimetype.startsWith("image/")) {
       text = await extractor.extractFromImage(file.buffer);
+    } else if (file.mimetype === DOCX_MIME) {
+      try {
+        const paragraphs = extractParagraphs(file.buffer);
+        text = paragraphsToText(paragraphs);
+        if (files.length === 1) docxNativeParagraphs = paragraphs;
+      } catch (docxErr) {
+        console.warn(`⚠️ Failed to parse .docx ${file.originalname} (non-fatal):`, docxErr.message);
+      }
     } else {
       console.warn(`Unsupported file: ${file.originalname}`);
     }
@@ -77,22 +96,45 @@ async function processFiles({ files, userId, conversationId, country }) {
   }
   extractedText = extractedText.trim();
 
-  let clauseAnalysis = null;
-  if (extractedText) {
-    log("Running clause checker");
-    try {
-      clauseAnalysis = await clauseChecker.checkIllegalClauses(extractedText, country);
-      log("Clause check done", { hasIssues: !!clauseAnalysis });
-    } catch (clauseErr) {
-      console.warn("⚠️ Clause checker failed (non-fatal):", clauseErr.message);
-    }
-  }
+  // Template-preserving document generation (the "Download Revised
+  // Document" feature) and clause checking are independent of each other —
+  // run them concurrently so the Gotenberg round-trip (pdf/image origin
+  // only) doesn't add its latency on top of the clause-check LLM call.
+  // Document creation only applies to a single-file upload: with multiple
+  // files there's no single "the document" to anchor a template-preserving
+  // download to, so it's skipped for that case (feature just doesn't
+  // surface, same non-fatal degrade as any other extraction failure).
+  const documentTemplatePromise =
+    files.length === 1
+      ? createDocumentTemplate({
+          file: files[0],
+          userId,
+          conversationId,
+          nativeParagraphs: docxNativeParagraphs,
+        })
+      : Promise.resolve(null);
+
+  const clauseAnalysisPromise = extractedText
+    ? clauseChecker
+        .checkIllegalClauses(extractedText, country, docxNativeParagraphs)
+        .catch((clauseErr) => {
+          console.warn("⚠️ Clause checker failed (non-fatal):", clauseErr.message);
+          return null;
+        })
+    : Promise.resolve(null);
+
+  log("Running clause checker + document template creation");
+  const [documentId, clauseAnalysis] = await Promise.all([
+    documentTemplatePromise,
+    clauseAnalysisPromise,
+  ]);
+  log("Clause check + document template done", { hasIssues: !!clauseAnalysis, hasDocument: !!documentId });
 
   log("Waiting for vector ingestion");
   await job.waitUntilFinished(ingestionQueueEvents);
   log("Vector ingestion complete");
 
-  return { extractedText, clauseAnalysis };
+  return { extractedText, clauseAnalysis, documentId };
 }
 
 /* =========================================================
@@ -136,7 +178,7 @@ export async function handleTextQuery(req, res) {
 
     log("Conversation ready", { conversationId: convo._id });
 
-    const { extractedText, clauseAnalysis } = await processFiles({
+    const { extractedText, clauseAnalysis, documentId } = await processFiles({
       files,
       userId,
       conversationId: convo._id,
@@ -148,13 +190,17 @@ export async function handleTextQuery(req, res) {
 
     log("History loaded", { messageCount: recentMessages.length });
 
-    await appendMessage({
+    const userMsg = await appendMessage({
       conversationId: convo._id,
       userId,
       role: "user",
       content: query || `[Uploaded: ${files.map((f) => f.originalname).join(", ")}]`,
       documentText: extractedText,
     });
+
+    // processFiles() creates the Document row before this Message exists
+    // (extraction happens before appendMessage runs), so link them now.
+    await linkDocumentToMessage(documentId, userMsg._id);
 
     log("User message saved");
     log("Calling RAG service");
@@ -167,7 +213,7 @@ export async function handleTextQuery(req, res) {
 
     log("RAG completed", { hasAnswer: !!ragResponse?.answer, sources: ragResponse?.sources?.length || 0 });
 
-    await appendMessage({
+    const assistantMsg = await appendMessage({
       conversationId: convo._id,
       userId,
       role: "assistant",
@@ -189,6 +235,7 @@ export async function handleTextQuery(req, res) {
       documentText: extractedText || null,
       documentMode: ragResponse.documentMode || null,
       conversationId: convo._id.toString(),
+      messageId: assistantMsg._id.toString(),
       modelUsed: ragResponse.modelUsed || null,
       latencyMs: ragResponse.latencyMs || null,
       durationMs: duration,
@@ -314,7 +361,7 @@ export async function handleTextQueryStream(req, res) {
        Happens before streaming so the vector store is ready.
     ------------------------------------------------------- */
 
-    const { extractedText, clauseAnalysis } = await processFiles({
+    const { extractedText, clauseAnalysis, documentId } = await processFiles({
       files,
       userId,
       conversationId: convo._id,
@@ -338,13 +385,17 @@ export async function handleTextQueryStream(req, res) {
        SAVE USER MESSAGE
     ------------------------------------------------------- */
 
-    await appendMessage({
+    const userMsg = await appendMessage({
       conversationId: convo._id,
       userId,
       role: "user",
       content: query || `[Uploaded: ${files.map((f) => f.originalname).join(", ")}]`,
       documentText: extractedText,
     });
+
+    // processFiles() creates the Document row before this Message exists
+    // (extraction happens before appendMessage runs), so link them now.
+    await linkDocumentToMessage(documentId, userMsg._id);
 
     log("User message saved");
 
@@ -402,7 +453,7 @@ export async function handleTextQueryStream(req, res) {
     ------------------------------------------------------- */
 
     if (fullAnswer) {
-      await appendMessage({
+      const assistantMsg = await appendMessage({
         conversationId: convo._id,
         userId,
         role: "assistant",
@@ -411,6 +462,7 @@ export async function handleTextQueryStream(req, res) {
         clauseAnalysis: clauseAnalysis ?? null,
         documentText: "",
       });
+      send("messageId", assistantMsg._id.toString());
       log("Assistant message saved", { length: fullAnswer.length });
     }
 

@@ -82,9 +82,22 @@ function computeRecommendation(healthScore) {
 ========================================================= */
 
 export class ClauseCheckerService {
+  /**
+   * @param {string} text - plain-text document (or paragraph-numbered
+   *   rendering, when `paragraphs` is supplied — see below).
+   * @param {string} country
+   * @param {Array<{index:number, text:string}>|null} paragraphs - when
+   *   provided (docx-backed uploads), the prompt is built from a
+   *   paragraph-numbered rendering of the document and the LLM is asked to
+   *   return a `paragraphIndex` per issue, which clauseAnchor.service.js
+   *   later uses to anchor a patch to the exact original paragraph. When
+   *   omitted, behavior is byte-identical to before this param existed
+   *   (plain Q&A / non-docx uploads are unaffected).
+   */
   async checkIllegalClauses(
     text,
-    country = "nigeria"
+    country = "nigeria",
+    paragraphs = null
   ) {
     const started = Date.now();
 
@@ -95,10 +108,23 @@ export class ClauseCheckerService {
           country,
           textLength:
             text?.length || 0,
+          paragraphMode: !!paragraphs?.length,
         }
       );
 
-      const { text: trimmed, truncated } = trimText(text);
+      const documentForPrompt = paragraphs?.length
+        ? paragraphs.map((p) => `[${p.index}] ${p.text}`).join("\n")
+        : text;
+
+      const { text: trimmed, truncated } = trimText(documentForPrompt);
+
+      const paragraphIndexField = paragraphs?.length
+        ? `\n- "paragraphIndex": the number in brackets ([N]) of the paragraph this clause appears in (use the FIRST paragraph number if the clause spans several). Use null for "missing" items.`
+        : "";
+
+      const paragraphInstructions = paragraphs?.length
+        ? `\n\nThe document below is rendered as one paragraph per line, each prefixed with its paragraph number in brackets, e.g. "[3] This Agreement...". Use these numbers only to fill in "paragraphIndex" — do not include the bracketed numbers in "clauseText" or "suggestedRevision".`
+        : "";
 
       const prompt = `
 You are a legal compliance assistant reviewing an entire contract/document for the jurisdiction below.
@@ -112,13 +138,14 @@ Also identify clauses that are MANDATORY for this type of document under the jur
 
 Country:
 ${country.toUpperCase()}
+${paragraphInstructions}
 
 For every "needs_attention", "high_risk", and "missing" item, provide:
 - "clause": short clause name/title (e.g. "Termination")
 - "clauseText": the exact verbatim text of the clause as it appears in the document (empty string "" if the clause is "missing" since there's nothing to quote)
 - "businessImpact": one or two sentences on the concrete business/legal consequence
 - "legalBasis": a FULL statutory citation — section/article number, the act's full name, chapter/cap number if applicable, and "Laws of the Federation of Nigeria <year>" (or the equivalent full citation form for the given country). Do not return a bare act name alone — legal professionals need the complete citation to trust it.
-- "suggestedRevision": replacement clause text (or, for "missing" items, the clause text to add) that resolves the issue
+- "suggestedRevision": replacement clause text (or, for "missing" items, the clause text to add) that resolves the issue${paragraphIndexField}
 
 Also return "compliantCount": the total number of clauses you classified as "compliant" (do not list them individually, just the count).
 
@@ -134,7 +161,7 @@ Return STRICT JSON ONLY, matching exactly this shape:
       "clauseText": "...",
       "businessImpact": "...",
       "legalBasis": "...",
-      "suggestedRevision": "..."
+      "suggestedRevision": "..."${paragraphs?.length ? `,\n      "paragraphIndex": 3` : ""}
     }
   ]
 }
@@ -201,6 +228,8 @@ ${trimmed}
         businessImpact: i.businessImpact || "",
         legalBasis: i.legalBasis || "",
         suggestedRevision: i.suggestedRevision || "",
+        paragraphIndex:
+          typeof i.paragraphIndex === "number" ? i.paragraphIndex : null,
       }));
 
       const healthScore = computeHealthScore({ compliant, needsAttention, highRisk, missingMandatory });

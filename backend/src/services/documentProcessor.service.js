@@ -14,6 +14,8 @@ import { chunkText } from "../utils/textChunker.js";
 import { generateDocumentHash } from "../utils/hash.js";
 import { ExtractionService } from "./extraction.service.js";
 import { qdrant, USER_DOCS_COLLECTION } from "../vectorstore/qdrant.js";
+import { extractParagraphs, paragraphsToText } from "./docxStructure.service.js";
+import { DOCX_MIME } from "./documentTemplate.service.js";
 
 const extractor = new ExtractionService();
 
@@ -161,6 +163,8 @@ export async function processUploadedDocuments({ files = [], userId, conversatio
             extractedText = await extractor.extractFromTXT(buffer);
           } else if (file.mimetype.startsWith("image/")) {
             extractedText = await extractor.extractFromImage(buffer);
+          } else if (file.mimetype === DOCX_MIME) {
+            extractedText = paragraphsToText(extractParagraphs(buffer));
           } else {
             log("Unsupported file skipped", { fileName: file.originalname });
             continue;

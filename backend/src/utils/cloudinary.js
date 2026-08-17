@@ -34,3 +34,32 @@ export function uploadAvatar(buffer, userId) {
     stream.end(buffer);
   });
 }
+
+/**
+ * Uploads a non-image document (docx/pdf) buffer as a Cloudinary raw
+ * resource — used for the template-preserving document-review feature
+ * (the canonical uploaded/converted docx, and later the generated
+ * revised-document downloads).
+ */
+export function uploadRawDocument(buffer, { folder, publicId } = {}) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: folder || "documents",
+        public_id: publicId,
+        overwrite: true,
+        resource_type: "raw",
+      },
+      (err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      }
+    );
+    stream.end(buffer);
+  });
+}
+
+/** Deletes a Cloudinary raw resource by public_id. */
+export function deleteRawDocument(publicId) {
+  return cloudinary.uploader.destroy(publicId, { resource_type: "raw" });
+}

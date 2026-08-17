@@ -9,6 +9,7 @@ import path from "path";
 import { ingestFolderFile } from "../services/ingest.service.js";
 import { releaseLock } from "../utils/distributedLock.js";
 import redis from "../services/redis.js";
+import { stripTrailingHashSegment } from "../utils/filename.js";
 
 function log(step, data = null) {
   const timestamp = new Date().toISOString();
@@ -37,20 +38,26 @@ const worker = new Worker(
 
     log("Job started", { jobId: job.id, fileName, country, attempt: job.attemptsMade + 1 });
 
+    const cleanedFileName = stripTrailingHashSegment(fileName);
+
+    if (cleanedFileName !== fileName) {
+      log("Filename cleaned", { original: fileName, cleaned: cleanedFileName });
+    }
+
     const result = await ingestFolderFile({
       filePath,
-      originalname: fileName,
+      originalname: cleanedFileName,
       country,
     });
 
     await fs.mkdir(doneDir, { recursive: true });
-    const donePath = path.join(doneDir, fileName);
+    const donePath = path.join(doneDir, cleanedFileName);
     await fs.rename(filePath, donePath);
 
-    log("Moved TO -> DONE", { fileName, donePath });
+    log("Moved TO -> DONE", { fileName: cleanedFileName, donePath });
     log(
       result.duplicate ? "Job finished (duplicate skipped)" : "Job finished (ingested)",
-      { jobId: job.id, fileName, chunksUploaded: result.chunksUploaded, durationMs: Date.now() - jobStartedAt }
+      { jobId: job.id, fileName: cleanedFileName, chunksUploaded: result.chunksUploaded, durationMs: Date.now() - jobStartedAt }
     );
 
     return result;

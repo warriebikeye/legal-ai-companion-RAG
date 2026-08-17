@@ -6,6 +6,7 @@ import { scheduleDailyReset } from "./cron/dailyReset.js";
 import { scheduleTokenExpiry } from "./cron/tokenExpiry.js";
 import { initializeQdrantCollections } from "./vectorstore/qdrant.js";
 import { startVectorCleanupWorker } from "./workers/vectorCleanup.worker.js";
+import { startGeneratedDocCleanupWorker } from "./workers/generatedDocCleanup.worker.js";
 import { apiRateLimiter } from "./middleware/rateLimiter.js";
 import express from "express";
 import cookieParser from "cookie-parser";
@@ -26,6 +27,7 @@ import authRoutes from "./routes/auth.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import walletRouter from "./routes/wallet.routes.js";
 import conversationRoutes from "./routes/conversation.routes.js";
+import documentGenerationRoutes from "./routes/documentGeneration.routes.js";
 import { swaggerUi, specs } from "./docs/swagger.js";
 import "./config/passport.js";
 
@@ -93,6 +95,7 @@ async function startServer() {
     console.log("📦 Initializing Qdrant collections...");
     await initializeQdrantCollections();
     startVectorCleanupWorker();
+    startGeneratedDocCleanupWorker();
     console.log("✅ Qdrant initialized");
 
     /* =====================================================
@@ -253,6 +256,7 @@ async function startServer() {
     app.use("/report",        violationRoutes);
     app.use("/api/referral",  referralRouter);
     app.use("/conversations", conversationRoutes);
+    app.use("/documents",     documentGenerationRoutes);
     app.use("/subscription",  subscriptionRoutes);
     app.use("/api/wallet",    walletRouter);
     app.use("/payments",      paymentRoutes);

@@ -92,18 +92,18 @@ async function ensureCollection(collectionName) {
 }
 
 /**
- * Retry an embedContent call with exponential backoff, but only for
+ * Retry a batchEmbedContents call with exponential backoff, but only for
  * rate-limit (429) errors — anything else is rethrown immediately.
  */
-async function embedWithRetry(embeddingModel, chunk, { maxRetries = 5, baseDelay = 1000 } = {}) {
+async function embedBatchWithRetry(embeddingModel, chunks, { maxRetries = 5, baseDelay = 1000 } = {}) {
   let attempt = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
-      const result = await embeddingModel.embedContent({
-        content: { parts: [{ text: chunk }] },
+      const result = await embeddingModel.batchEmbedContents({
+        requests: chunks.map((chunk) => ({ content: { parts: [{ text: chunk }] } })),
       });
-      return result.embedding.values;
+      return result.embeddings.map((e) => e.values);
     } catch (err) {
       const is429 =
         err?.status === 429 || /429|rate limit|quota|resource_exhausted/i.test(err?.message || "");
@@ -112,7 +112,9 @@ async function embedWithRetry(embeddingModel, chunk, { maxRetries = 5, baseDelay
       if (!is429 || attempt > maxRetries) throw err;
 
       const delay = baseDelay * 2 ** (attempt - 1);
-      console.warn(`⚠️ Gemini 429 — retrying embed in ${delay}ms (attempt ${attempt}/${maxRetries})`);
+      console.warn(
+        `⚠️ Gemini 429 — retrying batch of ${chunks.length} in ${delay}ms (attempt ${attempt}/${maxRetries})`
+      );
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
@@ -172,39 +174,55 @@ async function ingestBuffer({ buffer, originalname, mimetype, country, documentH
   const embeddingModel = genAI.getGenerativeModel({ model: "gemini-embedding-001" });
   const points = [];
 
-  for (let i = 0; i < paragraphs.length; i++) {
-    let { text: chunk, page } = paragraphs[i];
+  // ✅ safer truncation aligned to embedding limits
+  const truncated = paragraphs.map(({ text, page }) => ({
+    page,
+    text: text.length > 2000 ? text.slice(0, 2000) : text,
+  }));
 
-    // ✅ safer truncation aligned to embedding limits
-    if (chunk.length > 2000) {
-      chunk = chunk.slice(0, 2000);
-    }
+  // Gemini's batchEmbedContents accepts up to 100 requests per call — this
+  // turns e.g. 214 individual embedContent round-trips into 3 batch calls,
+  // which is both faster and uses fewer requests against the rate limit.
+  const EMBED_BATCH_SIZE = 100;
+
+  for (let i = 0; i < truncated.length; i += EMBED_BATCH_SIZE) {
+    const batch = truncated.slice(i, i + EMBED_BATCH_SIZE);
 
     try {
-      const vector = await embedWithRetry(embeddingModel, chunk);
+      const vectors = await embedBatchWithRetry(
+        embeddingModel,
+        batch.map((c) => c.text)
+      );
 
-      points.push({
-        id: uuidv4(),
-        vector,
-        payload: {
-          text: chunk,
-          country,
-          source: originalname,
-          page,
-          documentHash,
-        },
+      vectors.forEach((vector, j) => {
+        points.push({
+          id: uuidv4(),
+          vector,
+          payload: {
+            text: batch[j].text,
+            country,
+            source: originalname,
+            page: batch[j].page,
+            documentHash,
+          },
+        });
       });
 
-      if ((i + 1) % 10 === 0 || i === paragraphs.length - 1) {
-        console.log(`📈 Embedded ${i + 1}/${paragraphs.length} chunks for "${originalname}"`);
-      }
+      console.log(
+        `📈 Embedded ${Math.min(i + EMBED_BATCH_SIZE, truncated.length)}/${truncated.length} chunks for "${originalname}"`
+      );
 
-      // ✅ smoother rate limiting (prevents Gemini 429 storms)
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      // Small gap between batch calls — far fewer calls now, so this is
+      // cheap insurance rather than the primary throttle.
+      await new Promise((resolve) => setTimeout(resolve, 300));
     } catch (err) {
-      console.error(`⚠️ Embedding failed for chunk ${i}: ${err.message}`);
+      console.error(
+        `⚠️ Embedding batch failed (chunks ${i}-${i + batch.length - 1}): ${err.message}`
+      );
       if (strict) {
-        throw new Error(`Embedding failed for chunk ${i} of ${originalname}: ${err.message}`);
+        throw new Error(
+          `Embedding failed for chunks ${i}-${i + batch.length - 1} of ${originalname}: ${err.message}`
+        );
       }
     }
   }

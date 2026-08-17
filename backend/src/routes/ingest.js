@@ -8,6 +8,14 @@ import { acquireLock, releaseLock } from '../utils/distributedLock.js';
 import redis from '../services/redis.js';
 import { SUPPORTED_COUNTRIES } from '../config/countries.js';
 import { INGESTION_ROOT } from '../config/ingestionPaths.js';
+import { stripTrailingHashSegment } from '../utils/filename.js';
+
+// Per-country filename cleanup applied before a file is ingested/saved to
+// DONE. Ghana's source PDFs carry a trailing "-<hash>" segment that isn't
+// wanted in citations or the archived filename.
+const FILENAME_CLEANERS = {
+  ghana: stripTrailingHashSegment,
+};
 
 const upload = multer({ dest: 'uploads/' });
 const router = express.Router();
@@ -234,17 +242,25 @@ router.post('/train/folder', async (req, res) => {
       await redis.set(`folder-ingest-remaining:${slug}`, files.length);
       await redis.del(statsKey);
 
+      const cleanName = FILENAME_CLEANERS[slug] || ((n) => n);
+
       for (const entry of files) {
+        const savedFileName = cleanName(entry.name);
+
+        if (savedFileName !== entry.name) {
+          log('Cleaned filename', { country: name, original: entry.name, cleaned: savedFileName });
+        }
+
         await folderIngestionQueue.add('ingest-file', {
           country: name,
           slug,
-          fileName: entry.name,
-          filePath: path.join(toDir, entry.name),
+          fileName: savedFileName, // used for source metadata + DONE filename
+          filePath: path.join(toDir, entry.name), // real on-disk path, unchanged
           doneDir,
           lockKey,
           statsKey,
         });
-        log('Enqueued file', { country: name, fileName: entry.name });
+        log('Enqueued file', { country: name, fileName: savedFileName });
       }
 
       log('Country scan complete', { country: name, enqueued: files.length });
